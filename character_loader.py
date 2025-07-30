@@ -121,6 +121,34 @@ class CharacterLoader:
                 return i
         return 0  # 如果没有默认角色，返回第一个
     
+    def get_character_attribute(self, character_id, attribute_path):
+        """
+        获取角色的特定属性
+        attribute_path: 属性路径，如 'stats.attack_power' 或 'animations.gif_folder'
+        """
+        character_data = self.get_character_by_id(character_id)
+        if not character_data:
+            return None
+        
+        # 按路径获取属性
+        current = character_data
+        for key in attribute_path.split('.'):
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return None
+        
+        return current
+    
+    def should_flip_animation(self, character_id, animation_name):
+        """
+        检查指定角色的指定动画是否需要翻转
+        """
+        flip_settings = self.get_character_attribute(character_id, 'animations.flip_animations')
+        if flip_settings and isinstance(flip_settings, dict):
+            return flip_settings.get(animation_name, False)
+        return False
+    
     def reload_characters(self):
         """重新加载角色配置"""
         self.characters.clear()

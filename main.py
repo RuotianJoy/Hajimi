@@ -58,6 +58,7 @@ class Player:
         self.facing_right = True
         self.character_folder = character_folder or "gif/CharacterOne/"
         self.character_name = character_name
+        self.character_loader = None  # 将在set_character_stats中设置
         
         # 根据角色设置属性
         self.set_character_stats(character_name)
@@ -76,6 +77,9 @@ class Player:
     
     def set_character_stats(self, character_name, character_loader=None):
         """根据角色名称设置属性"""
+        # 保存character_loader引用
+        self.character_loader = character_loader
+        
         # 默认属性（备用）
         default_stats = {
             "attack_power": 3,
@@ -332,12 +336,33 @@ class Player:
         # 获取当前动画帧
         current_frame = self.get_current_frame()
         
-        # 如果面向左边，翻转图片
-        if self.facing_right:
-            screen.blit(current_frame, (self.x, self.y))
+        # 检查当前动画是否需要特殊翻转处理
+        should_flip_animation = False
+        if self.character_loader and hasattr(self, 'character_name'):
+            # 根据角色名称查找对应的角色ID
+            char_id = None
+            for cid, data in self.character_loader.characters.items():
+                if data["name"] == self.character_name:
+                    char_id = cid
+                    break
+            
+            if char_id:
+                should_flip_animation = self.character_loader.should_flip_animation(char_id, self.current_animation)
+        
+        # 决定是否翻转图片
+        need_flip = False
+        if should_flip_animation:
+            # 如果动画本身需要翻转，则反转facing_right的逻辑
+            need_flip = self.facing_right
         else:
+            # 正常逻辑：面向左边时翻转
+            need_flip = not self.facing_right
+        
+        if need_flip:
             flipped_frame = pygame.transform.flip(current_frame, True, False)
             screen.blit(flipped_frame, (self.x, self.y))
+        else:
+            screen.blit(current_frame, (self.x, self.y))
 
 class Platform:
     def __init__(self, x, y, width, height):
