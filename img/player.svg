@@ -1,0 +1,28 @@
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <!-- Player character - simple design -->
+  
+  <!-- Body -->
+  <rect x="20" y="30" width="24" height="30" fill="#4169E1" rx="3"/>
+  
+  <!-- Head -->
+  <circle cx="32" cy="20" r="12" fill="#FFDBAC"/>
+  
+  <!-- Eyes -->
+  <circle cx="28" cy="18" r="2" fill="black"/>
+  <circle cx="36" cy="18" r="2" fill="black"/>
+  
+  <!-- Mouth -->
+  <path d="M 28 24 Q 32 26 36 24" stroke="black" stroke-width="1" fill="none"/>
+  
+  <!-- Arms -->
+  <rect x="12" y="32" width="8" height="20" fill="#FFDBAC" rx="4"/>
+  <rect x="44" y="32" width="8" height="20" fill="#FFDBAC" rx="4"/>
+  
+  <!-- Legs -->
+  <rect x="22" y="58" width="8" height="6" fill="#8B4513" rx="2"/>
+  <rect x="34" y="58" width="8" height="6" fill="#8B4513" rx="2"/>
+  
+  <!-- Feet -->
+  <ellipse cx="26" cy="62" rx="6" ry="2" fill="black"/>
+  <ellipse cx="38" cy="62" rx="6" ry="2" fill="black"/>
+</svg>

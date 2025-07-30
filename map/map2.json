@@ -1,0 +1,74 @@
+{
+  "name": "天空之城",
+  "description": "高空平台挑战，考验跳跃技巧",
+  "background_color": [70, 130, 180],
+  "platforms": [
+    {
+      "x": 0,
+      "y": "HEIGHT - 50",
+      "width": "WIDTH",
+      "height": 50,
+      "type": "ground"
+    },
+    {
+      "x": 100,
+      "y": "HEIGHT - 150",
+      "width": 150,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 400,
+      "y": "HEIGHT - 280",
+      "width": 120,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 700,
+      "y": "HEIGHT - 200",
+      "width": 180,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 950,
+      "y": "HEIGHT - 350",
+      "width": 100,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 200,
+      "y": "HEIGHT - 400",
+      "width": 120,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 500,
+      "y": "HEIGHT - 450",
+      "width": 200,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 800,
+      "y": "HEIGHT - 500",
+      "width": 150,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 50,
+      "y": "HEIGHT - 550",
+      "width": 100,
+      "height": 32,
+      "type": "platform"
+    }
+  ],
+  "spawn_point": {
+    "x": 50,
+    "y": "HEIGHT - 200"
+  }
+}

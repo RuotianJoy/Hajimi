@@ -1,0 +1,53 @@
+{
+  "name": "经典平台",
+  "description": "经典的多层平台地图，适合新手练习",
+  "background_color": [135, 206, 235],
+  "platforms": [
+    {
+      "x": 0,
+      "y": "HEIGHT - 50",
+      "width": "WIDTH",
+      "height": 50,
+      "type": "ground"
+    },
+    {
+      "x": 300,
+      "y": "HEIGHT - 150",
+      "width": 200,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 600,
+      "y": "HEIGHT - 250",
+      "width": 200,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 900,
+      "y": "HEIGHT - 180",
+      "width": 200,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 150,
+      "y": "HEIGHT - 300",
+      "width": 150,
+      "height": 32,
+      "type": "platform"
+    },
+    {
+      "x": 750,
+      "y": "HEIGHT - 350",
+      "width": 150,
+      "height": 32,
+      "type": "platform"
+    }
+  ],
+  "spawn_point": {
+    "x": 100,
+    "y": "HEIGHT - 200"
+  }
+}

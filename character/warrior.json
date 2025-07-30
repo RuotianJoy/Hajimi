@@ -1,0 +1,36 @@
+{
+  "id": "warrior",
+  "name": "战士",
+  "description": "强壮的战士，拥有强大的攻击力和防御力",
+  "type": "坦克型",
+  "color": [139, 69, 19],
+  "stats": {
+    "attack_power": 4,
+    "speed_multiplier": 0.7,
+    "defense": 5,
+    "jump_multiplier": 0.8,
+    "max_health": 150,
+    "star_ratings": {
+      "attack": 4,
+      "speed": 2,
+      "defense": 5,
+      "jump": 2
+    }
+  },
+  "animations": {
+    "gif_folder": "gif/CharacterOne/",
+    "files": {
+      "idle": "noMoveAnimation.gif",
+      "move": "MoveAnimation.gif",
+      "sprint": "SprintAnimation.gif"
+    }
+  },
+  "gameplay": {
+    "character_class": "tank",
+    "special_abilities": ["heavy_armor", "strong_attack"],
+    "unlock_requirements": {
+      "default": false,
+      "level_required": 5
+    }
+  }
+}
