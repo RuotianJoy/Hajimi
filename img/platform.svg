@@ -1,25 +1,75 @@
-<svg width="64" height="32" xmlns="http://www.w3.org/2000/svg">
-  <!-- Platform tile -->
+<svg width="64" height="48" xmlns="http://www.w3.org/2000/svg">
+  <!-- Ancient stone platform tile -->
+  <defs>
+    <!-- Stone texture gradient -->
+    <linearGradient id="stoneGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#A0A0A0;stop-opacity:1" />
+      <stop offset="30%" style="stop-color:#8C8C8C;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#707070;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#5A5A5A;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Moss gradient -->
+    <linearGradient id="mossGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#6B8E23;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#556B2F;stop-opacity:0.9" />
+    </linearGradient>
+    
+    <!-- Stone pattern -->
+    <pattern id="stonePattern" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#808080"/>
+      <circle cx="2" cy="2" r="0.5" fill="#696969" opacity="0.6"/>
+      <circle cx="6" cy="5" r="0.3" fill="#A9A9A9" opacity="0.4"/>
+    </pattern>
+  </defs>
   
-  <!-- Main platform -->
-  <rect x="0" y="0" width="64" height="32" fill="#8B4513"/>
+  <!-- Main stone platform -->
+  <rect x="0" y="0" width="64" height="48" fill="url(#stoneGrad)"/>
   
-  <!-- Grass on top -->
-  <rect x="0" y="0" width="64" height="4" fill="#228B22"/>
+  <!-- Stone texture overlay -->
+  <rect x="0" y="0" width="64" height="48" fill="url(#stonePattern)" opacity="0.3"/>
   
-  <!-- Texture lines -->
-  <line x1="0" y1="8" x2="64" y2="8" stroke="#654321" stroke-width="1"/>
-  <line x1="0" y1="16" x2="64" y2="16" stroke="#654321" stroke-width="1"/>
-  <line x1="0" y1="24" x2="64" y2="24" stroke="#654321" stroke-width="1"/>
+  <!-- Ancient moss on top and edges -->
+  <rect x="0" y="0" width="64" height="4" fill="url(#mossGrad)"/>
+  <rect x="0" y="0" width="3" height="48" fill="url(#mossGrad)" opacity="0.6"/>
+  <rect x="61" y="0" width="3" height="48" fill="url(#mossGrad)" opacity="0.6"/>
   
-  <!-- Vertical texture -->
-  <line x1="16" y1="4" x2="16" y2="32" stroke="#654321" stroke-width="1"/>
-  <line x1="32" y1="4" x2="32" y2="32" stroke="#654321" stroke-width="1"/>
-  <line x1="48" y1="4" x2="48" y2="32" stroke="#654321" stroke-width="1"/>
+  <!-- Stone block divisions -->
+  <line x1="21" y1="0" x2="21" y2="48" stroke="#4A4A4A" stroke-width="1" opacity="0.8"/>
+  <line x1="42" y1="0" x2="42" y2="48" stroke="#4A4A4A" stroke-width="1" opacity="0.8"/>
   
-  <!-- Small grass details -->
-  <path d="M 8 0 L 10 -2 L 12 0" stroke="#32CD32" stroke-width="1" fill="none"/>
-  <path d="M 24 0 L 26 -2 L 28 0" stroke="#32CD32" stroke-width="1" fill="none"/>
-  <path d="M 40 0 L 42 -2 L 44 0" stroke="#32CD32" stroke-width="1" fill="none"/>
-  <path d="M 56 0 L 58 -2 L 60 0" stroke="#32CD32" stroke-width="1" fill="none"/>
+  <!-- Horizontal mortar lines -->
+  <line x1="0" y1="12" x2="64" y2="12" stroke="#4A4A4A" stroke-width="0.5" opacity="0.6"/>
+  <line x1="0" y1="24" x2="64" y2="24" stroke="#4A4A4A" stroke-width="0.5" opacity="0.6"/>
+  <line x1="0" y1="36" x2="64" y2="36" stroke="#4A4A4A" stroke-width="0.5" opacity="0.6"/>
+  
+  <!-- Ancient weathering marks -->
+  <ellipse cx="10" cy="8" rx="3" ry="1" fill="#696969" opacity="0.4"/>
+  <ellipse cx="32" cy="20" rx="4" ry="1.5" fill="#696969" opacity="0.3"/>
+  <ellipse cx="50" cy="12" rx="2" ry="1" fill="#696969" opacity="0.4"/>
+  <ellipse cx="15" cy="32" rx="3" ry="1.2" fill="#696969" opacity="0.3"/>
+  <ellipse cx="45" cy="38" rx="2.5" ry="1" fill="#696969" opacity="0.4"/>
+  
+  <!-- Small cracks -->
+  <path d="M 15 7 Q 16 10 15 16" stroke="#4A4A4A" stroke-width="0.5" fill="none" opacity="0.5"/>
+  <path d="M 45 26 Q 47 28 46 35" stroke="#4A4A4A" stroke-width="0.5" fill="none" opacity="0.5"/>
+  <path d="M 25 14 Q 26 18 25 22" stroke="#4A4A4A" stroke-width="0.5" fill="none" opacity="0.4"/>
+  
+  <!-- Ancient carved details -->
+  <rect x="5" y="38" width="12" height="2" fill="#5A5A5A" opacity="0.6"/>
+  <rect x="25" y="40" width="8" height="1" fill="#5A5A5A" opacity="0.6"/>
+  <rect x="45" y="39" width="10" height="1.5" fill="#5A5A5A" opacity="0.6"/>
+  <rect x="8" y="28" width="6" height="1.5" fill="#5A5A5A" opacity="0.5"/>
+  <rect x="35" y="30" width="8" height="1" fill="#5A5A5A" opacity="0.5"/>
+  
+  <!-- Moss spots -->
+  <circle cx="8" cy="2" r="1" fill="#6B8E23" opacity="0.7"/>
+  <circle cx="28" cy="1" r="0.8" fill="#6B8E23" opacity="0.6"/>
+  <circle cx="48" cy="2" r="1.2" fill="#6B8E23" opacity="0.8"/>
+  <circle cx="58" cy="1" r="0.6" fill="#6B8E23" opacity="0.5"/>
+  <circle cx="12" cy="18" r="0.8" fill="#6B8E23" opacity="0.6"/>
+  <circle cx="38" cy="15" r="1" fill="#6B8E23" opacity="0.7"/>
+  <circle cx="52" cy="25" r="0.7" fill="#6B8E23" opacity="0.5"/>
+  <circle cx="18" cy="35" r="0.9" fill="#6B8E23" opacity="0.6"/>
+  <circle cx="42" cy="42" r="0.8" fill="#6B8E23" opacity="0.7"/>
 </svg>

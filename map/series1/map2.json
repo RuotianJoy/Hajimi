@@ -1,0 +1,56 @@
+{
+  "name": "跳跃挑战",
+  "description": "测试你的跳跃技巧",
+  "background_color": [100, 149, 237],
+  "platforms": [
+    {
+      "x": 0,
+      "y": "HEIGHT - 75",
+      "width": "WIDTH",
+      "height": 75,
+      "type": "ground"
+    },
+    {
+      "x": 300,
+      "y": "HEIGHT - 200",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 700,
+      "y": "HEIGHT - 300",
+      "width": 150,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1100,
+      "y": "HEIGHT - 200",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1500,
+      "y": "HEIGHT - 350",
+      "width": 180,
+      "height": 48,
+      "type": "platform"
+    }
+  ],
+  "portals": [
+    {
+      "x": 1550,
+      "y": "HEIGHT - 446",
+      "width": 64,
+      "height": 96,
+      "target_map": "next_level",
+      "type": "level_portal"
+    }
+  ],
+  "spawn_point": {
+    "x": 100,
+    "y": "HEIGHT - 200"
+  }
+}

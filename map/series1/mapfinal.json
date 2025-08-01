@@ -1,0 +1,19 @@
+{
+  "name": "终点站",
+  "description": "恭喜通关！这里是你的终点",
+  "background_color": [255, 215, 0],
+  "platforms": [
+    {
+      "x": 0,
+      "y": "HEIGHT - 75",
+      "width": "WIDTH",
+      "height": 75,
+      "type": "ground"
+    }
+  ],
+  "portals": [],
+  "spawn_point": {
+    "x": 50,
+    "y": "HEIGHT - 200"
+  }
+}

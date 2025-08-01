@@ -2,6 +2,8 @@ import pygame
 import sys
 import os
 import json
+import math
+import uuid
 from enum import Enum
 from network import NetworkClient
 from character_loader import CharacterLoader
@@ -11,13 +13,13 @@ pygame.init()
 pygame.font.init()
 
 # 游戏常量
-WIDTH = 1280
-HEIGHT = 720
+WIDTH = 1920
+HEIGHT = 1080
 FPS = 60
-GRAVITY = 0.8
-JUMP_STRENGTH = -15
-PLAYER_SPEED = 5
-PLATFORM_HEIGHT = 32
+GRAVITY = 1.2
+JUMP_STRENGTH = -22
+PLAYER_SPEED = 8
+PLATFORM_HEIGHT = 48
 
 # 颜色定义
 WHITE = (255, 255, 255)
@@ -46,12 +48,295 @@ ONLINE = 2
 HOST_ROOM = 3
 JOIN_ROOM_MODE = 4
 
+class Projectile:
+    def __init__(self, x, y, direction_x, direction_y, damage, owner_id, max_bounces=2):
+        self.x = x
+        self.y = y
+        self.width = 32
+        self.height = 32
+        # 碰撞盒比视觉大小小一些，提高碰撞精度
+        self.collision_width = 20
+        self.collision_height = 20
+        self.vel_x = direction_x * 4  # 弹幕速度（进一步降低）
+        self.vel_y = direction_y * 4
+        self.damage = damage
+        self.owner_id = owner_id
+        self.max_bounces = max_bounces
+        self.bounces = 0
+        self.active = True
+        self.projectile_id = str(uuid.uuid4())
+        
+        # 拖尾效果相关
+        self.trail_positions = []  # 存储历史位置
+        self.max_trail_length = 8  # 拖尾最大长度
+        
+        # 加载弹幕图像
+        self.load_projectile_image()
+        
+        # 使用较小的碰撞盒，居中对齐
+        offset_x = (self.width - self.collision_width) // 2
+        offset_y = (self.height - self.collision_height) // 2
+        self.rect = pygame.Rect(x + offset_x, y + offset_y, self.collision_width, self.collision_height)
+    
+    def load_projectile_image(self):
+        """加载弹幕图像"""
+        try:
+            projectile_path = "/Users/ruotianjoy/PycharmProjects/Hajimi/weapon/meowmere/Meowmere_(projectile).webp"
+            if os.path.exists(projectile_path):
+                self.image = pygame.image.load(projectile_path).convert_alpha()
+                self.image = pygame.transform.scale(self.image, (self.width, self.height))
+            else:
+                # 创建默认弹幕图像
+                self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+                pygame.draw.circle(self.image, (255, 100, 255), (self.width//2, self.height//2), self.width//3)
+        except Exception as e:
+            # 创建默认弹幕图像
+            self.image = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, (255, 100, 255), (self.width//2, self.height//2), self.width//3)
+    
+    def update(self, dt, platforms):
+        """更新弹幕位置和碰撞检测"""
+        if not self.active:
+            return
+        
+        # 记录当前位置到拖尾
+        self.trail_positions.append((self.x, self.y))
+        if len(self.trail_positions) > self.max_trail_length:
+            self.trail_positions.pop(0)
+        
+        # 更新位置
+        self.x += self.vel_x * dt * 60
+        self.y += self.vel_y * dt * 60
+        # 更新碰撞盒位置，保持居中对齐
+        offset_x = (self.width - self.collision_width) // 2
+        offset_y = (self.height - self.collision_height) // 2
+        self.rect.x = int(self.x + offset_x)
+        self.rect.y = int(self.y + offset_y)
+        
+        # 检查平台碰撞
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                self.bounce_off_platform(platform)
+                break
+        
+        # 检查屏幕边界
+        if self.x < 0 or self.x > WIDTH or self.y < 0 or self.y > HEIGHT:
+            if self.bounces < self.max_bounces:
+                self.bounce_off_screen()
+            else:
+                self.active = False
+    
+    def bounce_off_platform(self, platform):
+        """从平台反弹"""
+        if self.bounces >= self.max_bounces:
+            self.active = False
+            return
+        
+        # 计算反弹方向
+        center_x = self.rect.centerx
+        center_y = self.rect.centery
+        platform_center_x = platform.rect.centerx
+        platform_center_y = platform.rect.centery
+        
+        # 判断碰撞面并调整位置
+        if abs(center_x - platform_center_x) > abs(center_y - platform_center_y):
+            # 水平碰撞
+            self.vel_x = -self.vel_x
+            # 将弹幕移出平台
+            if center_x < platform_center_x:
+                # 弹幕在平台左侧
+                self.x = platform.rect.left - self.width
+            else:
+                # 弹幕在平台右侧
+                self.x = platform.rect.right
+        else:
+            # 垂直碰撞
+            self.vel_y = -self.vel_y
+            # 将弹幕移出平台
+            if center_y < platform_center_y:
+                # 弹幕在平台上方
+                self.y = platform.rect.top - self.height
+            else:
+                # 弹幕在平台下方
+                self.y = platform.rect.bottom
+        
+        # 更新碰撞盒位置
+        offset_x = (self.width - self.collision_width) // 2
+        offset_y = (self.height - self.collision_height) // 2
+        self.rect.x = int(self.x + offset_x)
+        self.rect.y = int(self.y + offset_y)
+        
+        self.bounces += 1
+        self.damage = int(self.damage * 0.5)  # 每次反弹伤害减半
+        
+        # 移除频繁的调试打印以提高性能
+        # print(f"弹幕反弹！反弹次数: {self.bounces}/{self.max_bounces}, 剩余伤害: {self.damage}")
+    
+    def bounce_off_screen(self):
+        """从屏幕边界反弹"""
+        if self.x <= 0 or self.x >= WIDTH:
+            self.vel_x = -self.vel_x
+        if self.y <= 0 or self.y >= HEIGHT:
+            self.vel_y = -self.vel_y
+        
+        self.bounces += 1
+        self.damage = int(self.damage * 0.5)  # 每次反弹伤害减半
+    
+    def draw(self, screen):
+        """绘制弹幕"""
+        if self.active:
+            # 绘制拖尾
+            for i, (trail_x, trail_y) in enumerate(self.trail_positions):
+                alpha = int(255 * (i + 1) / len(self.trail_positions) * 0.5)  # 透明度渐变
+                trail_surface = pygame.Surface((8, 8), pygame.SRCALPHA)
+                trail_surface.fill((255, 255, 100, alpha))  # 黄色拖尾
+                screen.blit(trail_surface, (int(trail_x), int(trail_y)))
+            
+            # 绘制弹幕本体
+            screen.blit(self.image, (self.rect.x, self.rect.y))
+
+class Weapon:
+    def __init__(self, weapon_type="meowmere"):
+        self.weapon_type = weapon_type
+        self.attack_cooldown = 0
+        self.attack_cooldown_max = 0.5  # 0.5秒攻击冷却
+        
+        # 挥舞动画相关
+        self.is_swinging = False
+        self.swing_timer = 0
+        self.swing_duration = 15  # 挥舞动画持续15帧
+        self.swing_angle_offset = 0
+        
+        # 加载武器图像
+        self.load_weapon_image()
+    
+    def load_weapon_image(self):
+        """加载武器图像"""
+        try:
+            weapon_path = "/Users/ruotianjoy/PycharmProjects/Hajimi/weapon/meowmere/Meowmere.webp"
+            if os.path.exists(weapon_path):
+                self.image = pygame.image.load(weapon_path).convert_alpha()
+                # 增加剑的大小到96x96
+                self.image = pygame.transform.scale(self.image, (96, 96))
+            else:
+                # 创建默认武器图像
+                self.image = pygame.Surface((96, 96), pygame.SRCALPHA)
+                pygame.draw.rect(self.image, (200, 200, 200), (15, 15, 66, 66))
+        except Exception as e:
+            # 创建默认武器图像
+            self.image = pygame.Surface((96, 96), pygame.SRCALPHA)
+            pygame.draw.rect(self.image, (200, 200, 200), (15, 15, 66, 66))
+    
+    def can_attack(self):
+        """检查是否可以攻击"""
+        return self.attack_cooldown <= 0
+    
+    def attack(self, player_x, player_y, mouse_x, mouse_y, attack_power):
+        """执行攻击，返回弹幕对象"""
+        if not self.can_attack():
+            return None
+        
+        # 计算攻击方向（从玩家中心到鼠标位置）
+        player_center_x = player_x + 48  # 玩家中心X
+        player_center_y = player_y + 48  # 玩家中心Y
+        dx = mouse_x - player_center_x
+        dy = mouse_y - player_center_y
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        if distance > 0:
+            direction_x = dx / distance
+            direction_y = dy / distance
+        else:
+            direction_x = 1
+            direction_y = 0
+        
+        # 设置攻击冷却和挥舞动画
+        self.attack_cooldown = self.attack_cooldown_max
+        self.is_swinging = True
+        self.swing_timer = 0
+        
+        # 计算武器发射位置（根据方向动态计算）
+        weapon_offset = 40  # 武器距离玩家中心的距离
+        weapon_x = player_center_x + direction_x * weapon_offset
+        weapon_y = player_center_y + direction_y * weapon_offset
+        
+        # 创建弹幕
+        projectile = Projectile(
+            weapon_x,  # 从武器位置发射
+            weapon_y,
+            direction_x,
+            direction_y,
+            attack_power,  # 100%攻击力
+            "player"  # 所有者ID
+        )
+        
+        return projectile
+    
+    def update(self, dt):
+        """更新武器状态"""
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= dt
+        
+        # 更新挥舞动画
+        if self.is_swinging:
+            self.swing_timer += 1
+            # 计算挥舞角度偏移（正弦波动画）
+            progress = self.swing_timer / self.swing_duration
+            self.swing_angle_offset = math.sin(progress * math.pi) * 45  # 最大45度偏移
+            
+            if self.swing_timer >= self.swing_duration:
+                self.is_swinging = False
+                self.swing_timer = 0
+                self.swing_angle_offset = 0
+    
+    def draw(self, screen, player_x, player_y, mouse_x, mouse_y, facing_right):
+        """绘制武器"""
+        # 计算角色图中心偏右的位置（玩家宽度96，高度96）
+        if facing_right:
+            # 面向右边：定位在角色图3/4位置
+            weapon_anchor_x = player_x + 72  # 角色图3/4位置
+            weapon_anchor_y = player_y + 48  # 角色图中点高度
+        else:
+            # 面向左边：定位在角色图1/4位置
+            weapon_anchor_x = player_x + 24  # 角色图1/4位置
+            weapon_anchor_y = player_y + 48  # 角色图中点高度
+        
+        # 计算武器朝向鼠标的角度
+        dx = mouse_x - weapon_anchor_x
+        dy = mouse_y - weapon_anchor_y
+        angle = math.degrees(math.atan2(dy, dx))
+        
+        # 添加挥舞角度偏移
+        final_angle = angle + self.swing_angle_offset
+        
+        # 根据朝向决定是否翻转武器
+        weapon_image = self.image
+        if not facing_right:
+            # 面向左边时，水平翻转武器
+            weapon_image = pygame.transform.flip(self.image, True, False)
+            # 调整角度以适应翻转
+            final_angle = 180 - final_angle
+        
+        # 旋转武器图像
+        rotated_image = pygame.transform.rotate(weapon_image, -final_angle)
+        
+        # 以左下角定位到锚点
+        rotated_rect = rotated_image.get_rect()
+        if facing_right:
+            # 面向右边：剑的左下角对准锚点
+            rotated_rect.bottomleft = (weapon_anchor_x, weapon_anchor_y)
+        else:
+            # 面向左边：剑的右下角对准锚点
+            rotated_rect.bottomright = (weapon_anchor_x, weapon_anchor_y)
+        
+        screen.blit(rotated_image, rotated_rect)
+
 class Player:
     def __init__(self, x, y, character_folder=None, character_name="哈基为"):
         self.x = x
         self.y = y
-        self.width = 64
-        self.height = 64
+        self.width = 96
+        self.height = 96
         self.vel_x = 0
         self.vel_y = 0
         self.on_ground = False
@@ -74,6 +359,16 @@ class Player:
         self.load_animations()
         
         self.rect = pygame.Rect(x, y, self.width, self.height)
+        
+        # 伤害免疫时间
+        self.damage_immunity_time = 0
+        self.damage_immunity_duration = 1.0  # 1秒免疫时间
+        
+        # 武器系统（仅哈基为角色拥有）
+        if character_name == "哈基为":
+            self.weapon = Weapon("meowmere")
+        else:
+            self.weapon = None
     
     def set_character_stats(self, character_name, character_loader=None):
         """根据角色名称设置属性"""
@@ -205,7 +500,7 @@ class Player:
         surface.fill(BLUE)
         return surface
     
-    def update(self, platforms, key_bindings=None):
+    def update(self, platforms, key_bindings=None, dt=1/60):
         # 处理水平移动
         keys = pygame.key.get_pressed()
         self.vel_x = 0
@@ -280,6 +575,10 @@ class Player:
             self.y = HEIGHT - self.height
             self.vel_y = 0
             self.on_ground = True
+        
+        # 更新武器
+        if self.weapon:
+            self.weapon.update(dt)
     
     def set_animation(self, animation_name):
         """设置当前动画"""
@@ -313,24 +612,67 @@ class Player:
         
         for platform in platforms:
             if self.rect.colliderect(platform.rect):
-                # 从上方碰撞（着陆）
-                if self.vel_y > 0 and self.rect.bottom <= platform.rect.top + 10:
-                    self.y = platform.rect.top - self.height
-                    self.vel_y = 0
-                    self.on_ground = True
-                # 从下方碰撞（撞头）
-                elif self.vel_y < 0 and self.rect.top >= platform.rect.bottom - 10:
-                    self.y = platform.rect.bottom
-                    self.vel_y = 0
-                # 从左侧碰撞
-                elif self.vel_x > 0 and self.rect.right <= platform.rect.left + 10:
-                    self.x = platform.rect.left - self.width
-                # 从右侧碰撞
-                elif self.vel_x < 0 and self.rect.left >= platform.rect.right - 10:
-                    self.x = platform.rect.right
+                # 计算角色中心点
+                player_center_x = self.x + self.width / 2
+                player_center_y = self.y + self.height / 2
+                platform_center_x = platform.x + platform.width / 2
+                platform_center_y = platform.y + platform.height / 2
                 
+                # 计算重叠区域
+                overlap_x = min(self.rect.right, platform.rect.right) - max(self.rect.left, platform.rect.left)
+                overlap_y = min(self.rect.bottom, platform.rect.bottom) - max(self.rect.top, platform.rect.top)
+                
+                # 更精确的碰撞方向判断
+                # 如果垂直重叠很小，说明是水平碰撞
+                if overlap_y < overlap_x:
+                    # 垂直碰撞（从上方或下方）
+                    if self.vel_y > 0 and player_center_y < platform_center_y:
+                        # 从上方着陆
+                        self.y = platform.rect.top - self.height
+                        self.vel_y = 0
+                        self.on_ground = True
+                    elif self.vel_y < 0 and player_center_y > platform_center_y:
+                        # 从下方撞击
+                        self.y = platform.rect.bottom
+                        self.vel_y = 0
+                else:
+                    # 水平碰撞（从左侧或右侧）
+                    if self.vel_x > 0 and player_center_x < platform_center_x:
+                        # 从左侧碰撞
+                        self.x = platform.rect.left - self.width
+                        self.vel_x = 0
+                    elif self.vel_x < 0 and player_center_x > platform_center_x:
+                        # 从右侧碰撞
+                        self.x = platform.rect.right
+                        self.vel_x = 0
+                
+                # 更新矩形位置
                 self.rect.x = self.x
                 self.rect.y = self.y
+    
+    def take_damage(self, damage):
+        """玩家受到伤害"""
+        import time
+        current_time = time.time()
+        
+        # 检查是否在免疫时间内
+        if current_time - self.damage_immunity_time < self.damage_immunity_duration:
+            return False  # 免疫伤害
+        
+        # 计算实际伤害（攻击力 - 防御力，最少1点伤害）
+        actual_damage = max(1, damage - self.defense)
+        
+        # 扣除血量
+        self.current_health -= actual_damage
+        if self.current_health < 0:
+            self.current_health = 0
+        
+        # 设置免疫时间
+        self.damage_immunity_time = current_time
+        
+        print(f"玩家受到 {actual_damage} 点伤害（原始伤害: {damage}, 防御力: {self.defense}），剩余血量: {self.current_health}/{self.max_health}")
+        
+        return True  # 成功造成伤害
     
     def draw(self, screen):
         # 获取当前动画帧
@@ -358,11 +700,31 @@ class Player:
             # 正常逻辑：面向左边时翻转
             need_flip = not self.facing_right
         
+        # 准备要绘制的帧
+        frame_to_draw = current_frame
         if need_flip:
-            flipped_frame = pygame.transform.flip(current_frame, True, False)
-            screen.blit(flipped_frame, (self.x, self.y))
+            frame_to_draw = pygame.transform.flip(current_frame, True, False)
+        
+        # 检查是否在免疫时间内，添加闪烁效果
+        import time
+        current_time = time.time()
+        if current_time - self.damage_immunity_time < self.damage_immunity_duration:
+            # 闪烁效果：每0.1秒切换一次透明度
+            if int((current_time - self.damage_immunity_time) * 10) % 2 == 0:
+                # 创建半透明效果
+                alpha_surface = frame_to_draw.copy()
+                alpha_surface.set_alpha(128)  # 50%透明度
+                screen.blit(alpha_surface, (self.x, self.y))
+            else:
+                screen.blit(frame_to_draw, (self.x, self.y))
         else:
-            screen.blit(current_frame, (self.x, self.y))
+            # 正常绘制
+            screen.blit(frame_to_draw, (self.x, self.y))
+        
+        # 绘制武器
+        if self.weapon:
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+            self.weapon.draw(screen, self.x, self.y, mouse_x, mouse_y, self.facing_right)
 
 class Platform:
     def __init__(self, x, y, width, height):
@@ -378,7 +740,7 @@ class Platform:
             # 创建平铺的平台
             self.surface = pygame.Surface((width, height))
             tile_width = 64
-            tile_height = 32
+            tile_height = 48
             
             for i in range(0, width, tile_width):
                 for j in range(0, height, tile_height):
@@ -393,14 +755,489 @@ class Platform:
     def draw(self, screen):
         screen.blit(self.surface, (self.x, self.y))
 
+class Portal:
+    def __init__(self, x, y, width, height, target_map, portal_type="level_portal"):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.target_map = target_map
+        self.portal_type = portal_type
+        self.rect = pygame.Rect(x, y, width, height)
+        self.animation_time = 0
+        
+    def update(self, dt):
+        self.animation_time += dt
+        
+    def draw(self, screen):
+        # 绘制传送门动画效果
+        # 外圈发光效果
+        glow_color = (100 + int(50 * abs(math.sin(self.animation_time * 3))), 
+                     200 + int(55 * abs(math.sin(self.animation_time * 2))), 
+                     255)
+        pygame.draw.rect(screen, glow_color, 
+                        (self.x - 5, self.y - 5, self.width + 10, self.height + 10), 3)
+        
+        # 内部传送门
+        portal_color = (50 + int(30 * abs(math.sin(self.animation_time * 4))), 
+                       150 + int(50 * abs(math.sin(self.animation_time * 3))), 
+                       200 + int(55 * abs(math.sin(self.animation_time * 2))))
+        pygame.draw.rect(screen, portal_color, self.rect)
+        
+        # 中心亮点
+        center_x = self.x + self.width // 2
+        center_y = self.y + self.height // 2
+        center_color = (255, 255, 255, int(128 + 127 * abs(math.sin(self.animation_time * 5))))
+        pygame.draw.circle(screen, center_color[:3], (center_x, center_y), 8)
+        
+        # 传送门标识文字
+        font = pygame.font.Font(None, 24)
+        text = font.render("NEXT", True, (255, 255, 255))
+        text_rect = text.get_rect(center=(center_x, self.y - 20))
+        screen.blit(text, text_rect)
+
+class Enemy:
+    def __init__(self, enemy_data):
+        self.type = enemy_data['type']
+        self.variant = enemy_data['variant']
+        self.x = enemy_data['x']
+        self.y = enemy_data['y']
+        self.width = 64
+        self.height = 64
+        self.vel_x = 0
+        self.vel_y = 0
+        self.on_ground = False
+        
+        # 为多人模式添加唯一ID
+        import uuid
+        if 'deterministic_id' in enemy_data:
+            # 在多人模式下使用确定性ID
+            self.enemy_id = enemy_data['deterministic_id']
+        else:
+            # 单人模式或旧版本兼容，使用随机ID
+            self.enemy_id = enemy_data.get('enemy_id', str(uuid.uuid4())[:8])
+        
+        # 敌怪属性
+        self.max_health = enemy_data['health']
+        self.current_health = self.max_health
+        self.attack_power = enemy_data['attack_power']
+        self.speed = enemy_data['speed']
+        self.patrol_range = enemy_data['patrol_range']
+        self.aggro_range = enemy_data['aggro_range']
+        
+        # AI状态
+        self.state = 'patrol'  # patrol, chase, attack, idle
+        self.target_player = None
+        self.patrol_start_x = self.x
+        self.patrol_direction = 1
+        self.last_attack_time = 0
+        self.attack_cooldown = 1.0  # 攻击冷却时间
+        
+        # 特殊属性
+        if self.type == 'slime':
+            self.jump_strength = enemy_data.get('jump_strength', 75)  # 跳跃高度三倍
+            self.jump_timer = 0
+            self.jump_interval = 2.0  # 史莱姆跳跃间隔
+        elif self.type == 'spider':
+            self.wall_crawl = enemy_data.get('wall_crawl', False)
+        elif self.type == 'vulture':
+            self.flight_height_min = enemy_data.get('flight_height_min', 'HEIGHT - 600')
+            self.flight_height_max = enemy_data.get('flight_height_max', 'HEIGHT - 300')
+            self.flying = True
+        
+        # 动画相关
+        self.animation_frames = {}
+        self.current_animation = 'idle'
+        self.frame_index = 0
+        self.animation_speed = 0.05  # 加快动画速度，从0.1改为0.05
+        self.frame_timer = 0
+        self.facing_right = True
+        
+        # 秃鹫旋转角度
+        self.rotation = 0
+        
+        # 加载动画
+        self.load_animations()
+        
+        self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
+    
+    def load_animations(self):
+        """加载敌怪动画"""
+        try:
+            if self.type == 'slime':
+                gif_path = f'enemy/slime/{self.variant.title()}_Slime.gif'
+                frames = self.load_gif_frames(gif_path)
+                if frames:
+                    self.animation_frames['idle'] = frames
+                    self.animation_frames['move'] = frames
+                    self.animation_frames['jump'] = frames
+            elif self.type == 'spider':
+                if self.variant == 'ground_static':
+                    gif_path = 'enemy/spider/Black_Recluse_(ground).gif'
+                elif self.variant == 'ground_crawling':
+                    gif_path = 'enemy/spider/Black_Recluse_(ground).gif'
+                else:  # wall_crawling
+                    gif_path = 'enemy/spider/Black_Recluse.gif'
+                frames = self.load_gif_frames(gif_path)
+                if frames:
+                    self.animation_frames['idle'] = frames
+                    self.animation_frames['move'] = frames
+            elif self.type == 'vulture':
+                # 加载两个方向的动画
+                gif_path_left = 'enemy/vulture/Vulture_(flying).gif'  # 向左飞行（原始）
+                gif_path_right = 'enemy/vulture/Vulture_(flying)_flipped.gif'  # 向右飞行（翻转）
+                
+                frames_left = self.load_gif_frames(gif_path_left)
+                frames_right = self.load_gif_frames(gif_path_right)
+                
+                if frames_left and frames_right:
+                    self.animation_frames['fly_left'] = frames_left
+                    self.animation_frames['fly_right'] = frames_right
+                    # 默认动画使用向左飞行
+                    self.animation_frames['idle'] = frames_left
+                    self.animation_frames['move'] = frames_left
+                    self.animation_frames['fly'] = frames_left
+                elif frames_left:
+                    # 如果翻转文件不存在，使用原始文件
+                    self.animation_frames['idle'] = frames_left
+                    self.animation_frames['move'] = frames_left
+                    self.animation_frames['fly'] = frames_left
+                    self.animation_frames['fly_left'] = frames_left
+                    self.animation_frames['fly_right'] = frames_left
+        except Exception as e:
+            print(f"加载敌怪动画失败: {e}")
+            # 创建默认动画帧
+            self.create_fallback_frames()
+    
+    def load_gif_frames(self, gif_path):
+        """加载GIF动画帧"""
+        try:
+            from PIL import Image
+            frames = []
+            with Image.open(gif_path) as img:
+                for frame_num in range(img.n_frames):
+                    img.seek(frame_num)
+                    frame = img.copy().convert('RGBA')
+                    # 调整大小
+                    frame = frame.resize((self.width, self.height), Image.Resampling.LANCZOS)
+                    # 转换为pygame surface
+                    mode = frame.mode
+                    size = frame.size
+                    data = frame.tobytes()
+                    pygame_surface = pygame.image.fromstring(data, size, mode)
+                    frames.append(pygame_surface)
+            return frames
+        except Exception as e:
+            print(f"加载GIF失败 {gif_path}: {e}")
+            return None
+    
+    def create_fallback_frames(self):
+        """创建默认动画帧"""
+        surface = pygame.Surface((self.width, self.height))
+        if self.type == 'slime':
+            if self.variant == 'blue':
+                surface.fill((0, 100, 255))
+            elif self.variant == 'green':
+                surface.fill((0, 255, 100))
+            else:  # lava
+                surface.fill((255, 100, 0))
+        elif self.type == 'spider':
+            surface.fill((50, 50, 50))
+        elif self.type == 'vulture':
+            surface.fill((139, 69, 19))
+        
+        self.animation_frames = {
+            'idle': [surface],
+            'move': [surface],
+            'jump': [surface],
+            'fly': [surface]
+        }
+    
+    def update(self, dt, player, platforms, other_players=None):
+        """更新敌怪状态"""
+        if self.current_health <= 0:
+            return  # 敌怪已死亡
+        
+        # 更新AI状态
+        self.update_ai(player, other_players)
+        
+        # 根据类型更新移动
+        if self.type == 'slime':
+            self.update_slime_movement(dt, platforms)
+        elif self.type == 'spider':
+            self.update_spider_movement(dt, platforms)
+        elif self.type == 'vulture':
+            self.update_vulture_movement(dt)
+        
+        # 更新动画
+        self.update_animation(dt)
+        
+        # 更新矩形位置
+        self.rect.x = self.x
+        self.rect.y = self.y
+    
+    def update_physics_only(self, dt, platforms):
+        """只更新物理状态，不进行AI计算（用于非房主玩家）"""
+        if self.current_health <= 0:
+            return  # 敌怪已死亡
+        
+        # 根据类型更新基本物理（重力、碰撞等），保持当前移动方向
+        if self.type == 'slime':
+            # 保持水平移动
+            self.x += self.vel_x * dt * 60
+            # 应用重力
+            self.vel_y += GRAVITY
+            # 更新位置
+            self.y += self.vel_y * dt * 60
+            # 检查碰撞
+            self.check_collisions(platforms)
+        elif self.type == 'spider':
+            if self.variant in ['ground_static', 'ground_crawling']:
+                # 保持水平移动
+                self.x += self.vel_x * dt * 60
+                # 应用重力
+                self.vel_y += GRAVITY
+                # 更新位置
+                self.y += self.vel_y * dt * 60
+                # 检查碰撞
+                self.check_collisions(platforms)
+            elif self.variant == 'wall_crawling':
+                # 墙爬蜘蛛保持当前移动
+                self.x += self.vel_x * dt * 60
+                self.y += self.vel_y * dt * 60
+        elif self.type == 'vulture':
+            # 飞行敌人保持当前移动
+            self.x += self.vel_x * dt * 60
+            self.y += self.vel_y * dt * 60
+        
+        # 更新动画
+        self.update_animation(dt)
+        
+        # 更新矩形位置
+        self.rect.x = int(self.x)
+        self.rect.y = int(self.y)
+    
+    def update_ai(self, player, other_players=None):
+        """更新AI状态 - 仇恨机制"""
+        import math
+        
+        # 收集所有玩家
+        all_players = [player]
+        if other_players:
+            all_players.extend(other_players)
+        
+        # 寻找最近的玩家作为目标
+        target_player = None
+        min_distance = float('inf')
+        
+        for p in all_players:
+            if p and hasattr(p, 'x') and hasattr(p, 'y'):
+                distance = math.sqrt((self.x - p.x)**2 + (self.y - p.y)**2)
+                if distance < min_distance:
+                    min_distance = distance
+                    target_player = p
+        
+        if not target_player:
+            return
+        
+        # 根据距离更新AI状态
+        if min_distance <= self.aggro_range:
+            old_state = self.state
+            self.state = 'chase'
+            self.target_player = target_player
+            # 面向目标玩家
+            if target_player.x > self.x:
+                self.facing_right = True
+            else:
+                self.facing_right = False
+            
+            # 状态变化
+            if old_state != self.state:
+                pass  # 进入追击状态
+        elif min_distance > self.aggro_range * 1.5:  # 脱离仇恨范围
+            if self.state != 'patrol':
+                pass  # 脱离仇恨，回到巡逻状态
+            self.state = 'patrol'
+            self.target_player = None
+        
+        # 在追击状态下，如果距离很近，切换到攻击状态
+        if self.state == 'chase' and min_distance <= 80:  # 攻击范围
+            self.state = 'attack'
+        elif self.state == 'attack' and min_distance > 120:  # 脱离攻击范围
+            self.state = 'chase'
+    
+    def update_slime_movement(self, dt, platforms):
+        """更新史莱姆移动"""
+        pass
+    
+    def update_spider_movement(self, dt, platforms):
+        """更新蜘蛛移动"""
+        pass
+    
+    def update_vulture_movement(self, dt):
+        """更新秃鹫移动"""
+        pass
+    
+    def check_collisions(self, platforms):
+        """敌怪碰撞检测"""
+        self.on_ground = False
+        
+        for platform in platforms:
+            if self.rect.colliderect(platform.rect):
+                # 计算重叠区域
+                overlap_x = min(self.rect.right, platform.rect.right) - max(self.rect.left, platform.rect.left)
+                overlap_y = min(self.rect.bottom, platform.rect.bottom) - max(self.rect.top, platform.rect.top)
+                
+                if overlap_y < overlap_x:
+                    # 垂直碰撞
+                    if self.vel_y > 0:  # 从上方着陆
+                        self.y = platform.rect.top - self.height
+                        self.vel_y = 0
+                        self.on_ground = True
+                    elif self.vel_y < 0:  # 从下方撞击
+                        self.y = platform.rect.bottom
+                        self.vel_y = 0
+                else:
+                    # 水平碰撞
+                    if self.vel_x > 0:  # 从左侧碰撞
+                        self.x = platform.rect.left - self.width
+                        self.vel_x = 0
+                        # 史莱姆碰到墙壁时改变巡逻方向
+                        if self.type == 'slime' and self.state == 'patrol':
+                            self.patrol_direction *= -1
+                    elif self.vel_x < 0:  # 从右侧碰撞
+                        self.x = platform.rect.right
+                        self.vel_x = 0
+                        # 史莱姆碰到墙壁时改变巡逻方向
+                        if self.type == 'slime' and self.state == 'patrol':
+                            self.patrol_direction *= -1
+    
+    def update_animation(self, dt):
+        """更新动画"""
+        if not self.animation_frames or self.current_animation not in self.animation_frames:
+            return
+        
+        self.frame_timer += dt
+        if self.frame_timer >= self.animation_speed:
+            self.frame_timer = 0
+            frames = self.animation_frames[self.current_animation]
+            self.frame_index = (self.frame_index + 1) % len(frames)
+    
+    def get_current_frame(self):
+        """获取当前动画帧"""
+        if (self.current_animation in self.animation_frames and 
+            self.animation_frames[self.current_animation]):
+            frames = self.animation_frames[self.current_animation]
+            return frames[self.frame_index % len(frames)]
+        return None
+    
+    def draw(self, screen):
+        """绘制敌怪"""
+        frame = self.get_current_frame()
+        if frame:
+            # 根据敌怪类型调整尺寸
+            if self.type == 'spider':
+                if self.variant == 'wall_crawling':
+                    # 墙上蜘蛛放大1.5倍
+                    frame = pygame.transform.scale(frame, (int(frame.get_width() * 1.5), int(frame.get_height() * 1.5)))
+                else:
+                    # 普通蜘蛛宽度增加30%
+                    frame = pygame.transform.scale(frame, (int(frame.get_width() * 1.3), frame.get_height()))
+            elif self.type == 'vulture':
+                # 秃鹫放大1.4倍
+                frame = pygame.transform.scale(frame, (int(frame.get_width() * 1.4), int(frame.get_height() * 1.4)))
+                
+                # 秃鹫旋转处理（斜向飞行时应用旋转）
+                if hasattr(self, 'rotation') and self.rotation != 0:
+                    # 根据飞行方向调整旋转角度
+                    if self.facing_right:
+                        # 向右飞行，直接应用旋转角度
+                        frame = pygame.transform.rotate(frame, -self.rotation)
+                    else:
+                        # 向左飞行，需要镜像旋转角度
+                        frame = pygame.transform.rotate(frame, self.rotation)
+                
+                # 计算旋转后的绘制位置（居中）
+                frame_rect = frame.get_rect()
+                draw_x = self.x - (frame_rect.width - self.width) // 2
+                draw_y = self.y - (frame_rect.height - self.height) // 2
+                screen.blit(frame, (draw_x, draw_y))
+                return
+            
+            # 其他敌怪的正常处理
+            # 根据朝向翻转
+            if not self.facing_right:
+                frame = pygame.transform.flip(frame, True, False)
+            screen.blit(frame, (self.x, self.y))
+        else:
+            # 绘制默认矩形
+            color = (255, 0, 0) if self.type == 'slime' else (100, 100, 100)
+            pygame.draw.rect(screen, color, self.rect)
+        
+        # 绘制血条
+        if self.current_health < self.max_health:
+            bar_width = self.width
+            bar_height = 6
+            bar_x = self.x
+            bar_y = self.y - 10
+            
+            # 背景
+            pygame.draw.rect(screen, (100, 100, 100), (bar_x, bar_y, bar_width, bar_height))
+            # 血量
+            health_ratio = self.current_health / self.max_health
+            health_width = int(bar_width * health_ratio)
+            health_color = (255, 0, 0) if health_ratio < 0.3 else (255, 255, 0) if health_ratio < 0.7 else (0, 255, 0)
+            pygame.draw.rect(screen, health_color, (bar_x, bar_y, health_width, bar_height))
+    
+    def take_damage(self, damage):
+        """受到伤害"""
+        self.current_health -= damage
+        if self.current_health <= 0:
+            self.current_health = 0
+            return True  # 敌怪死亡
+        return False
+    
+    def can_attack(self):
+        """检查是否可以攻击"""
+        import time
+        current_time = time.time()
+        
+        # 检查攻击冷却时间
+        if current_time - self.last_attack_time < self.attack_cooldown:
+            return False
+        
+        # 在追击或攻击状态下都可以攻击
+        return self.state in ['chase', 'attack']
+    
+    def attack(self, player):
+        """攻击玩家"""
+        import time
+        current_time = time.time()
+        
+        # 更新最后攻击时间
+        self.last_attack_time = current_time
+        
+        # 根据敌怪类型设置攻击力
+        if self.type == 'slime':
+            damage = 10
+        elif self.type == 'vulture':
+            damage = 15
+        elif self.type == 'spider':
+            damage = 25
+        else:
+            damage = self.attack_power  # 使用默认攻击力
+        
+        print(f"{self.type}({self.variant}) 攻击玩家，造成 {damage} 点伤害")
+        return damage
+
 class Game:
     def __init__(self):
         # 设置相关
         self.fullscreen = False
         self.current_resolution = (WIDTH, HEIGHT)
-        # 固定分辨率为1280x720，不可更改
-        self.available_resolutions = [(1280, 720)]
-        self.resolution_index = 0  # 固定1280x720
+        # 固定分辨率为1920x1080，不可更改
+        self.available_resolutions = [(1920, 1080)]
+        self.resolution_index = 0  # 固定1920x1080
         
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("耄耋的家园")
@@ -415,6 +1252,8 @@ class Game:
         # 游戏对象（初始化为None，在开始游戏时创建）
         self.player = None
         self.platforms = None
+        self.portals = []
+        self.enemies = []  # 敌怪列表
         
         # 网络相关
         self.network_client = None
@@ -433,19 +1272,29 @@ class Game:
         self.previous_state = None  # 记录进入角色选择前的状态
         self.character_selected = False  # 记录角色是否已选择完成
         self.room_port = "12345"
-        self.room_players = []
+        self.room_players = {}
         self.local_server = None
         self.ping_time = 0
+        
+        # 传送门相关
+        self.portal_message_timer = 0  # 传送门等待消息显示计时器
+        
+        # 脏矩形更新相关
+        self.dirty_rects = []  # 存储需要更新的矩形区域
+        self.use_dirty_rects = True  # 是否启用脏矩形更新
+        self.last_frame_objects = {}  # 存储上一帧的对象位置信息
         self.input_field = "ip"  # "ip" 或 "port"
         self.last_character_send_time = 0  # 上次发送角色选择信息的时间
         
         # 房间解散相关
         
         # 地图相关
-        self.available_maps = []
-        self.selected_map = 0
+        self.available_map_series = []
+        self.selected_series = 0
+        self.selected_level = 0
         self.current_map_data = None
-        self.load_available_maps()
+        self.current_series_data = None
+        self.load_available_map_series()
         self.room_disbanded_message = None
         self.room_disbanded_time = 0
         self.show_disbanded_message = False
@@ -501,17 +1350,48 @@ class Game:
         # 音量控制
         self.master_volume = 0.5  # 主音量 (0.0 - 1.0)
         
-        # 加载背景音乐
-        try:
-            pygame.mixer.music.load('music/BackgroundMusic.mp3')
-            pygame.mixer.music.set_volume(self.master_volume)
-            pygame.mixer.music.play(-1)  # 循环播放
-        except:
-            print("无法加载背景音乐")
+        # 音乐状态跟踪
+        self.current_music = None  # 当前播放的音乐文件
+        self.music_files = {
+            'menu': 'music/hudmusic.mp3',
+            'game': 'music/BackgroundMusic.mp3'
+        }
+        
+        # 初始化音乐系统
+        pygame.mixer.init()
+        
+        # 开始播放菜单音乐
+        self.play_music('menu')
         
         # 动画图片相关
         self.crawling_animations = []
         self.load_crawling_animation()
+    
+    def play_music(self, music_type):
+        """播放指定类型的音乐"""
+        if music_type not in self.music_files:
+            print(f"未知的音乐类型: {music_type}")
+            return
+        
+        music_file = self.music_files[music_type]
+        
+        # 如果已经在播放相同的音乐，则不需要切换
+        if self.current_music == music_file:
+            return
+        
+        try:
+            # 停止当前音乐
+            pygame.mixer.music.stop()
+            
+            # 加载新音乐
+            pygame.mixer.music.load(music_file)
+            pygame.mixer.music.set_volume(self.master_volume)
+            pygame.mixer.music.play(-1)  # 循环播放
+            
+            self.current_music = music_file
+            print(f"开始播放音乐: {music_file}")
+        except Exception as e:
+            print(f"无法加载音乐文件 {music_file}: {e}")
     
     def handle_events(self):
         for event in pygame.event.get():
@@ -565,6 +1445,27 @@ class Game:
                         self.handle_waiting_room_click(event.pos)
                     elif self.state == PAUSED:
                         self.handle_paused_click(event.pos)
+                    elif self.state == PLAYING:
+                        # 处理武器攻击
+                        if hasattr(self, 'player') and self.player and self.player.weapon:
+                            if self.player.weapon.can_attack():
+                                mouse_x, mouse_y = event.pos
+                                projectile = self.player.weapon.attack(
+                                    self.player.x,
+                                    self.player.y,
+                                    mouse_x, mouse_y,
+                                    self.player.attack_power
+                                )
+                                if projectile:
+                                    if not hasattr(self, 'projectiles'):
+                                        self.projectiles = []
+                                    
+                                    # 限制弹幕数量以优化性能
+                                    if len(self.projectiles) >= self.max_projectiles:
+                                        # 移除最旧的弹幕
+                                        self.projectiles.pop(0)
+                                    
+                                    self.projectiles.append(projectile)
                 elif event.button == 4:  # 鼠标滚轮向上
                     if self.state == KEY_BINDING:
                         self.handle_key_binding_scroll(-1)
@@ -1002,21 +1903,31 @@ class Game:
             if self.mode == HOST_ROOM and len(self.room_players) >= 1:
                 self.state = CHARACTER_SELECT
         elif key == pygame.K_LEFT:
-            # 切换到上一张地图（仅房主可操作）
-            if self.mode == HOST_ROOM and self.available_maps:
-                self.selected_map = (self.selected_map - 1) % len(self.available_maps)
-                print(f"切换到地图: {self.available_maps[self.selected_map]['name']}")
+            # 切换到上一个系列（仅房主可操作）
+            if self.mode == HOST_ROOM and self.available_map_series:
+                self.selected_series = (self.selected_series - 1) % len(self.available_map_series)
+                self.selected_level = 0  # 总是从第一个关卡开始
+                
+                current_series = self.available_map_series[self.selected_series]
+                current_level = current_series['loaded_levels'][self.selected_level]
+                print(f"切换到系列: {current_series['series_name']} - {current_level['level_name']}")
                 # 发送地图选择给其他玩家
                 if self.network_client and self.network_client.connected:
-                    self.network_client.send_map_selection(self.selected_map, self.available_maps[self.selected_map]['name'])
+                    self.network_client.send_map_selection(self.selected_series * 100 + self.selected_level, 
+                                                         f"{current_series['series_name']} - {current_level['level_name']}")
         elif key == pygame.K_RIGHT:
-            # 切换到下一张地图（仅房主可操作）
-            if self.mode == HOST_ROOM and self.available_maps:
-                self.selected_map = (self.selected_map + 1) % len(self.available_maps)
-                print(f"切换到地图: {self.available_maps[self.selected_map]['name']}")
+            # 切换到下一个系列（仅房主可操作）
+            if self.mode == HOST_ROOM and self.available_map_series:
+                self.selected_series = (self.selected_series + 1) % len(self.available_map_series)
+                self.selected_level = 0  # 总是从第一个关卡开始
+                
+                current_series = self.available_map_series[self.selected_series]
+                current_level = current_series['loaded_levels'][self.selected_level]
+                print(f"切换到系列: {current_series['series_name']} - {current_level['level_name']}")
                 # 发送地图选择给其他玩家
                 if self.network_client and self.network_client.connected:
-                    self.network_client.send_map_selection(self.selected_map, self.available_maps[self.selected_map]['name'])
+                    self.network_client.send_map_selection(self.selected_series * 100 + self.selected_level, 
+                                                         f"{current_series['series_name']} - {current_level['level_name']}")
     
     def handle_waiting_room_click(self, mouse_pos):
         """处理等待房间页面的鼠标点击"""
@@ -1067,6 +1978,9 @@ class Game:
                 if self.network_client:
                     self.network_client.send_return_to_waiting_room()
                     self.network_client.game_started = False
+                
+                # 切换回菜单音乐
+                self.play_music('menu')
                 
                 # 返回等待房间
                 self.state = WAITING_ROOM
@@ -1128,8 +2042,10 @@ class Game:
         
         # 重新创建平台（基于地图数据，确保精确性）
         if self.platforms:
-            if hasattr(self, 'available_maps') and self.available_maps and hasattr(self, 'selected_map'):
-                current_map = self.available_maps[self.selected_map]
+            if (hasattr(self, 'available_map_series') and self.available_map_series and 
+                hasattr(self, 'selected_series') and hasattr(self, 'selected_level')):
+                current_series = self.available_map_series[self.selected_series]
+                current_map = current_series['loaded_levels'][self.selected_level]
                 self.platforms = self.create_platforms_from_map(current_map)
             else:
                 # 如果没有地图数据，使用比例调整
@@ -1208,14 +2124,21 @@ class Game:
     def start_game(self):
         """开始游戏，初始化游戏对象"""
         # 获取当前选择的地图数据
-        if self.available_maps and 0 <= self.selected_map < len(self.available_maps):
-            self.current_map_data = self.available_maps[self.selected_map]
+        if (self.available_map_series and 
+            0 <= self.selected_series < len(self.available_map_series) and
+            0 <= self.selected_level < len(self.available_map_series[self.selected_series]['loaded_levels'])):
+            self.current_series_data = self.available_map_series[self.selected_series]
+            self.current_map_data = self.current_series_data['loaded_levels'][self.selected_level]
         else:
-            # 如果没有可用地图，使用默认地图
-            self.create_default_map()
-            self.current_map_data = self.available_maps[0]
+            # 如果没有可用地图系列，使用默认地图系列
+            self.create_default_map_series()
+            self.current_series_data = self.available_map_series[0]
+            self.current_map_data = self.current_series_data['loaded_levels'][0]
         
         print(f"加载地图: {self.current_map_data['name']}")
+        
+        # 设置当前地图名称，用于敌人ID生成
+        self.current_map_name = self.current_map_data.get('level_name', self.current_map_data.get('name', 'default_map'))
         
         # 根据地图数据获取出生点
         spawn_x, spawn_y = self.get_spawn_point_from_map(self.current_map_data)
@@ -1230,14 +2153,28 @@ class Game:
         # 根据地图数据创建平台
         self.platforms = self.create_platforms_from_map(self.current_map_data)
         
+        # 根据地图数据创建传送门
+        self.portals = self.create_portals_from_map(self.current_map_data)
+        
         # 根据游戏模式初始化网络（仅在没有连接时）
         if self.game_mode == ONLINE and (not self.network_client or not self.network_client.connected):
             self.try_connect_to_server()
         
-        # 如果是联机模式，发送游戏开始消息给其他玩家
+        # 如果是联机模式
         if self.network_client and self.network_client.connected:
+            if self.network_client.is_host:
+                # 房主发送地图数据到服务端，让服务端统一管理敌人
+                self.network_client.send_map_data(self.current_map_data)
+                print("房主发送地图数据到服务端")
+                
+                # 初始化空的敌人列表，等待服务端同步
+                self.enemies = []
+            else:
+                # 非房主客户端也初始化空的敌人列表
+                self.enemies = []
+            
             self.network_client.send_game_start()
-            print("房主发送游戏开始信号")
+            print("发送游戏开始信号")
             
             # 立即发送当前玩家的游戏位置数据（使用相对坐标）
             rel_x, rel_y = self.absolute_to_relative(self.player.x, self.player.y)
@@ -1250,11 +2187,24 @@ class Game:
                 'character_name': self.character_options[self.selected_character]['name'] if self.character_selected else "未选择"
             }
             self.network_client.send_player_data(player_data)
+        else:
+            # 单机模式，在客户端创建敌人
+            self.enemies = self.create_enemies_from_map(self.current_map_data)
+        
+        # 初始化弹幕列表和性能优化设置
+        self.projectiles = []  # 弹幕列表
+        self.max_projectiles = 30  # 限制弹幕数量以提高性能
+        
+        # 切换到游戏音乐
+        self.play_music('game')
         
         self.state = PLAYING
     
     def cleanup_game(self):
         """清理游戏资源"""
+        # 切换回菜单音乐
+        self.play_music('menu')
+        
         # 先断开客户端连接，让服务器的延迟停止机制处理服务器关闭
         if self.network_client:
             self.network_client.disconnect()
@@ -1340,13 +2290,283 @@ class Game:
             self.network_client.return_to_waiting_room = False
             self.network_client.game_started = False
             
+            # 切换回菜单音乐
+            self.play_music('menu')
+            
             # 返回等待房间
             self.state = WAITING_ROOM
             print("返回等待房间")
             return
         
         if self.state == PLAYING and self.player:
-            self.player.update(self.platforms, self.key_bindings)
+            # 更新敌怪
+            dt = 1/60  # 时间增量，假设60FPS
+            self.player.update(self.platforms, self.key_bindings, dt)
+            
+            # 收集所有玩家信息用于敌人AI（仇恨机制）
+            other_players = []
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'other_players_data') and self.network_client.other_players_data):
+                for player_data in self.network_client.other_players_data.values():
+                    # 创建临时玩家对象用于敌人AI计算
+                    class TempPlayer:
+                        def __init__(self, x, y):
+                            self.x = x
+                            self.y = y
+                    
+                    if 'x' in player_data and 'y' in player_data:
+                        temp_player = TempPlayer(player_data['x'], player_data['y'])
+                        other_players.append(temp_player)
+            
+            # 在多人模式下，使用服务端对象池系统
+            if self.game_mode == OFFLINE:
+                # 单机模式：正常更新敌人AI和移动
+                for enemy in self.enemies[:]:
+                    enemy.update(dt, self.player, self.platforms, other_players)
+            elif self.game_mode == ONLINE and self.network_client and self.network_client.is_host:
+                # 房主：不在客户端计算敌人AI，完全依赖服务端对象池
+                # 但仍需要更新AI状态以支持攻击检测
+                for enemy in self.enemies[:]:
+                    enemy.update_ai(self.player, other_players)
+                    enemy.update_animation(dt)
+            else:
+                # 非房主玩家：更新AI状态以支持攻击检测，等待服务端同步位置数据
+                for enemy in self.enemies[:]:
+                    enemy.update_ai(self.player, other_players)
+                    enemy.update_animation(dt)
+            
+            # 处理网络伤害
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'pending_damage') and self.network_client.pending_damage > 0):
+                damage = self.network_client.pending_damage
+                self.network_client.pending_damage = 0  # 重置伤害
+                
+                self.player.take_damage(damage)
+                print(f"玩家受到网络伤害: {damage}点")
+                
+                # 检查玩家是否死亡
+                if self.player.current_health <= 0:
+                    print("玩家血量为0，游戏结束")
+                    if self.network_client and self.network_client.connected:
+                        player_name = self.player_name if self.player_name else "未命名玩家"
+                        self.network_client.send_player_death(player_name)
+                    self.show_game_over()
+                    return
+            
+            # 检查敌怪攻击所有玩家（仇恨机制）
+            all_players = [self.player]
+            # 添加其他在线玩家
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'other_players_data') and self.network_client.other_players_data):
+                for player_data in self.network_client.other_players_data.values():
+                    # 创建临时玩家对象用于碰撞检测
+                    temp_player = type('TempPlayer', (), {
+                        'x': player_data.get('x', 0),
+                        'y': player_data.get('y', 0),
+                        'rect': pygame.Rect(player_data.get('x', 0), player_data.get('y', 0), 64, 64),
+                        'player_id': player_data.get('player_id', ''),
+                        'name': player_data.get('name', '未命名玩家')
+                    })()
+                    all_players.append(temp_player)
+            
+            for enemy in self.enemies[:]:
+                if enemy.can_attack():
+                    # 检查与所有玩家的碰撞
+                    for player in all_players:
+                        if enemy.rect.colliderect(player.rect):
+                            damage = enemy.attack(player)
+                            if damage > 0:
+                                # 如果是当前玩家受到攻击
+                                if player == self.player:
+                                    self.player.take_damage(damage)
+                                    
+                                    # 检查玩家是否死亡
+                                    if self.player.current_health <= 0:
+                                        print("玩家血量为0，游戏结束")
+                                        # 在多人模式下发送玩家死亡信息
+                                        if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                                            player_name = self.player_name if self.player_name else "未命名玩家"
+                                            self.network_client.send_player_death(player_name)
+                                        self.show_game_over()
+                                        return
+                                else:
+                                    # 其他玩家受到攻击，通过网络发送伤害信息
+                                    if (self.game_mode == ONLINE and self.network_client and 
+                                        self.network_client.connected and hasattr(player, 'player_id')):
+                                        self.network_client.send_player_damage(player.player_id, damage)
+                            break  # 每个敌人每次只能攻击一个玩家
+                    
+            # 处理敌人死亡
+            dead_enemies = [enemy for enemy in self.enemies if enemy.current_health <= 0]
+            for dead_enemy in dead_enemies:
+                # 在多人模式下发送敌人死亡信息
+                if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                    self.network_client.send_enemy_death(dead_enemy.enemy_id)
+            
+            # 移除死亡的敌怪
+            self.enemies = [enemy for enemy in self.enemies if enemy.current_health > 0]
+            
+            # 处理网络同步的死亡敌人
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'dead_enemies') and self.network_client.dead_enemies):
+                # 移除网络同步的死亡敌人
+                self.enemies = [enemy for enemy in self.enemies if enemy.enemy_id not in self.network_client.dead_enemies]
+                # 清空已处理的死亡敌人列表
+                self.network_client.dead_enemies.clear()
+            
+            # 更新弹幕
+            if hasattr(self, 'projectiles'):
+                for projectile in self.projectiles[:]:
+                    projectile.update(dt, self.platforms)
+                    
+                    # 检查弹幕与敌怪的碰撞
+                    for enemy in self.enemies[:]:
+                        if projectile.rect.colliderect(enemy.rect):
+                            # 弹幕击中敌怪
+                            enemy.take_damage(projectile.damage)
+                            # 减少调试打印频率以提高性能
+                            if projectile.damage > 1:  # 只在造成有效伤害时打印
+                                print(f"弹幕击中敌怪 {enemy.type}，造成 {projectile.damage} 点伤害，敌人剩余血量: {enemy.current_health}/{enemy.max_health}")
+                            
+                            # 在网络模式下发送敌人受伤信息给服务端
+                            if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                                self.network_client.send_enemy_damage(enemy.enemy_id, projectile.damage, enemy.current_health)
+                            
+                            # 移除弹幕
+                            if projectile in self.projectiles:
+                                self.projectiles.remove(projectile)
+                            break
+                    
+                    # 移除超出反弹次数或离开屏幕太远的弹幕
+                    if (projectile.bounces >= projectile.max_bounces or 
+                        projectile.x < -200 or projectile.x > WIDTH + 200 or 
+                        projectile.y < -200 or projectile.y > HEIGHT + 200):
+                        if projectile in self.projectiles:
+                            self.projectiles.remove(projectile)
+            
+            # 多人模式下的敌人管理现在由服务端统一处理，客户端只接收同步数据
+                
+            # 处理服务端同步的敌人数据（所有客户端）
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'enemies_sync_data') and self.network_client.enemies_sync_data):
+                # 应用服务端同步的敌人数据
+                for enemy_data in self.network_client.enemies_sync_data:
+                    enemy_id = enemy_data.get('enemy_id')
+                    
+                    # 查找对应的敌人
+                    enemy_found = False
+                    for enemy in self.enemies:
+                        if enemy.enemy_id == enemy_id:
+                            enemy_found = True
+                            # 应用服务端的所有状态更新
+                            if 'health' in enemy_data:
+                                enemy.current_health = min(enemy_data['health'], enemy.max_health)
+                            if 'x' in enemy_data and 'y' in enemy_data:
+                                # 直接设置位置，确保同步准确性
+                                enemy.x = enemy_data['x']
+                                enemy.y = enemy_data['y']
+                                enemy.rect.x = int(enemy.x)
+                                enemy.rect.y = int(enemy.y)
+                            if 'vel_x' in enemy_data:
+                                enemy.vel_x = enemy_data['vel_x']
+                            if 'vel_y' in enemy_data:
+                                enemy.vel_y = enemy_data['vel_y']
+                            if 'facing_right' in enemy_data:
+                                enemy.facing_right = enemy_data['facing_right']
+                            if 'state' in enemy_data:
+                                enemy.state = enemy_data['state']
+                            if 'current_animation' in enemy_data:
+                                enemy.current_animation = enemy_data['current_animation']
+                            if 'frame_index' in enemy_data:
+                                enemy.frame_index = enemy_data['frame_index']
+                            # 同步血量数据（只有在服务端血量更低时才更新，避免覆盖客户端的伤害）
+                            if 'health' in enemy_data:
+                                server_health = enemy_data['health']
+                                if server_health < enemy.current_health:
+                                    enemy.current_health = server_health
+                                    print(f"同步敌人 {enemy.type} 血量: {enemy.current_health}/{enemy.max_health}")
+                            break
+                    
+                    # 如果敌人不存在，从服务端数据创建新敌人
+                    if not enemy_found and enemy_id:
+                        try:
+                            # 从服务端数据构造敌人创建数据
+                            create_enemy_data = {
+                                'type': enemy_data.get('type', 'slime'),
+                                'variant': enemy_data.get('variant', 'blue'),
+                                'x': enemy_data.get('x', 0),
+                                'y': enemy_data.get('y', 0),
+                                'health': enemy_data.get('health', 50),
+                                'attack_power': enemy_data.get('attack_power', 10),
+                                'speed': enemy_data.get('speed', 2),
+                                'patrol_range': enemy_data.get('patrol_range', 200),
+                                'aggro_range': enemy_data.get('aggro_range', 150),
+                                'deterministic_id': enemy_id
+                            }
+                            
+                            # 创建敌人对象
+                            new_enemy = Enemy(create_enemy_data)
+                            
+                            # 应用服务端状态
+                            if 'vel_x' in enemy_data:
+                                new_enemy.vel_x = enemy_data['vel_x']
+                            if 'vel_y' in enemy_data:
+                                new_enemy.vel_y = enemy_data['vel_y']
+                            if 'facing_right' in enemy_data:
+                                new_enemy.facing_right = enemy_data['facing_right']
+                            if 'state' in enemy_data:
+                                new_enemy.state = enemy_data['state']
+                            if 'current_animation' in enemy_data:
+                                new_enemy.current_animation = enemy_data['current_animation']
+                            if 'frame_index' in enemy_data:
+                                new_enemy.frame_index = enemy_data['frame_index']
+                            
+                            self.enemies.append(new_enemy)
+                            print(f"客户端从服务端数据创建敌人: {create_enemy_data['type']} ({create_enemy_data['variant']}) ID: {enemy_id}")
+                            
+                        except Exception as e:
+                            print(f"客户端创建敌人失败: {e}, 数据: {enemy_data}")
+                
+                # 清空已处理的敌人同步数据
+                self.network_client.enemies_sync_data.clear()
+            
+            # 处理传统的敌人更新消息（保持兼容性）
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'enemy_updates') and 
+                self.network_client.enemy_updates):
+                for enemy_id, enemy_update in self.network_client.enemy_updates.items():
+                    # 查找对应的敌人
+                    for enemy in self.enemies:
+                        if enemy.enemy_id == enemy_id:
+                            # 应用血量更新
+                            if 'current_health' in enemy_update:
+                                enemy.current_health = min(enemy_update['current_health'], enemy.max_health)
+                            break
+                
+                # 清空已处理的敌人更新
+                self.network_client.enemy_updates.clear()
+            
+            # 更新传送门
+            for portal in self.portals:
+                portal.update(1/60)  # 传入时间增量，假设60FPS
+            
+            # 检查传送门碰撞
+            self.check_portal_collisions()
+            
+            # 更新传送门等待消息计时器
+            if self.portal_message_timer > 0:
+                self.portal_message_timer -= 1/FPS
+                if self.portal_message_timer <= 0:
+                    self.portal_message_timer = 0
+            
+            # 检查是否收到传送门触发信号
+            if (self.game_mode == ONLINE and self.network_client and 
+                hasattr(self.network_client, 'portal_triggered') and self.network_client.portal_triggered):
+                print(f"收到传送门触发信号，传送到: {self.network_client.portal_target_map}")
+                # 重置传送门触发标志
+                self.network_client.portal_triggered = False
+                # 执行传送
+                self.teleport_to_map(self.network_client.portal_target_map)
             
             # 发送玩家数据到服务器（仅线上联机模式）
             if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
@@ -1382,9 +2602,18 @@ class Game:
             if (hasattr(self.network_client, 'map_updated') and self.network_client.map_updated and 
                 self.mode != HOST_ROOM):  # 只有非房主才接收地图更新
                 print(f"接收到房主的地图选择: {self.network_client.selected_map_name}")
-                # 更新本地地图选择
-                if 0 <= self.network_client.selected_map_index < len(self.available_maps):
-                    self.selected_map = self.network_client.selected_map_index
+                # 更新本地地图选择（解码系列和关卡索引）
+                map_index = self.network_client.selected_map_index
+                self.selected_series = map_index // 100
+                self.selected_level = map_index % 100
+                # 确保索引有效
+                if (0 <= self.selected_series < len(self.available_map_series) and
+                    0 <= self.selected_level < len(self.available_map_series[self.selected_series]['loaded_levels'])):
+                    pass  # 索引有效
+                else:
+                    # 索引无效，重置为默认值
+                    self.selected_series = 0
+                    self.selected_level = 0
                 # 重置地图更新标志
                 self.network_client.map_updated = False
             
@@ -1438,6 +2667,9 @@ class Game:
             self.update_crawling_animations()
     
     def draw(self):
+        # 清空脏矩形列表
+        self.dirty_rects = []
+        
         if self.state == MAIN_MENU:
             self.draw_main_menu()
         elif self.state == MODE_SELECT:
@@ -1457,10 +2689,51 @@ class Game:
         elif self.state in [PLAYING, PAUSED]:
             self.draw_game()
         
-        pygame.display.flip()
+        # 游戏状态下使用混合更新策略：背景全屏更新，动态对象脏矩形更新
+        if self.state in [PLAYING, PAUSED]:
+            # 游戏状态下始终使用全屏更新，避免地图拖影问题
+            pygame.display.flip()
+        else:
+            # 菜单界面使用全屏更新
+            pygame.display.flip()
+    
+    def optimize_dirty_rects(self, rects):
+        """优化脏矩形列表，合并重叠的矩形"""
+        if not rects:
+            return []
+        
+        # 移除重复的矩形（通过比较矩形的坐标和尺寸）
+        unique_rects = []
+        for rect in rects:
+            is_duplicate = False
+            for existing_rect in unique_rects:
+                if (rect.x == existing_rect.x and rect.y == existing_rect.y and 
+                    rect.width == existing_rect.width and rect.height == existing_rect.height):
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                unique_rects.append(rect)
+        
+        # 简单的合并策略：如果矩形数量较少，直接返回
+        if len(unique_rects) <= 3:
+            return unique_rects
+        
+        # 如果脏矩形过多，返回全屏更新
+        if len(unique_rects) > 20:
+            return [pygame.Rect(0, 0, self.screen.get_width(), self.screen.get_height())]
+        
+        return unique_rects
+    
+    def add_dirty_rect(self, rect):
+        """添加脏矩形区域"""
+        if rect and self.use_dirty_rects:
+            # 确保矩形在屏幕范围内
+            clipped_rect = rect.clip(pygame.Rect(0, 0, self.screen.get_width(), self.screen.get_height()))
+            if clipped_rect.width > 0 and clipped_rect.height > 0:
+                self.dirty_rects.append(clipped_rect)
     
     def draw_game(self):
-        # 绘制背景，确保覆盖整个屏幕
+        # 绘制背景，确保覆盖整个屏幕（背景不使用脏矩形，避免拖影）
         if self.background:
             # 如果背景尺寸与当前屏幕尺寸不匹配，重新缩放
             if self.background.get_size() != (WIDTH, HEIGHT):
@@ -1469,16 +2742,41 @@ class Game:
         else:
             self.screen.fill((135, 206, 235))  # 天蓝色背景
         
-        # 绘制平台
+        # 绘制平台（静态元素不使用脏矩形）
         for platform in self.platforms:
             platform.draw(self.screen)
         
-        # 绘制玩家
+        # 绘制传送门（静态元素不使用脏矩形）
+        for portal in self.portals:
+            portal.draw(self.screen)
+        
+        # 绘制敌怪并记录脏矩形
+        for enemy in self.enemies:
+            # 记录敌怪当前位置作为脏矩形
+            enemy_rect = pygame.Rect(enemy.x - 10, enemy.y - 10, enemy.width + 20, enemy.height + 20)
+            self.add_dirty_rect(enemy_rect)
+            enemy.draw(self.screen)
+        
+        # 绘制玩家并记录脏矩形
+        player_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, self.player.width + 20, self.player.height + 20)
+        self.add_dirty_rect(player_rect)
         self.player.draw(self.screen)
         
-        # 绘制其他玩家
+        # 绘制弹幕并记录脏矩形
+        if hasattr(self, 'projectiles'):
+            for projectile in self.projectiles:
+                # 记录弹幕位置作为脏矩形
+                proj_rect = pygame.Rect(projectile.x - 5, projectile.y - 5, 20, 20)
+                self.add_dirty_rect(proj_rect)
+                projectile.draw(self.screen)
+        
+        # 绘制其他玩家并记录脏矩形
         if self.network_client:
             self.draw_other_players()
+        
+        # 绘制传送门等待消息
+        if self.portal_message_timer > 0:
+            self.show_portal_waiting_message()
         
         # 绘制UI
         self.draw_ui()
@@ -2205,9 +3503,10 @@ class Game:
             self.screen.blit(waiting_text, waiting_rect)
         
         # 地图选择显示（仅房主可见） - 左中位置
-        if self.mode == HOST_ROOM and self.available_maps:
+        if self.mode == HOST_ROOM and self.available_map_series:
             map_font = self.get_chinese_font(int(20 * scale_factor))
-            current_map = self.available_maps[self.selected_map]
+            current_series = self.available_map_series[self.selected_series]
+            current_level = current_series['loaded_levels'][self.selected_level]
             
             # 缩略图尺寸和位置
             thumbnail_width = int(200 * scale_factor)
@@ -2216,18 +3515,24 @@ class Game:
             thumbnail_y = int(HEIGHT * 0.45)  # 中间位置
             
             # 绘制地图缩略图
-            self.draw_map_thumbnail(current_map, thumbnail_x, thumbnail_y, thumbnail_width, thumbnail_height)
+            self.draw_map_thumbnail(current_level, thumbnail_x, thumbnail_y, thumbnail_width, thumbnail_height)
             
-            # 地图名称显示在缩略图下方
-            map_text = f"当前地图: {current_map['name']}"
-            map_surface = map_font.render(map_text, True, WHITE)
-            map_rect = map_surface.get_rect(center=(thumbnail_x + thumbnail_width // 2, thumbnail_y + thumbnail_height + int(20 * scale_factor)))
-            self.screen.blit(map_surface, map_rect)
+            # 系列名称显示在缩略图下方
+            series_text = f"系列: {current_series['series_name']}"
+            series_surface = map_font.render(series_text, True, WHITE)
+            series_rect = series_surface.get_rect(center=(thumbnail_x + thumbnail_width // 2, thumbnail_y + thumbnail_height + int(15 * scale_factor)))
+            self.screen.blit(series_surface, series_rect)
+            
+            # 关卡名称显示
+            level_text = f"关卡: {current_level['level_name']}"
+            level_surface = map_font.render(level_text, True, (200, 200, 200))
+            level_rect = level_surface.get_rect(center=(thumbnail_x + thumbnail_width // 2, thumbnail_y + thumbnail_height + int(35 * scale_factor)))
+            self.screen.blit(level_surface, level_rect)
             
             # 地图切换提示
-            hint_text = "← → 切换地图"
-            hint_surface = map_font.render(hint_text, True, (200, 200, 200))
-            hint_rect = hint_surface.get_rect(center=(thumbnail_x + thumbnail_width // 2, thumbnail_y + thumbnail_height + int(45 * scale_factor)))
+            hint_text = "← → 切换系列"
+            hint_surface = map_font.render(hint_text, True, (150, 150, 150))
+            hint_rect = hint_surface.get_rect(center=(thumbnail_x + thumbnail_width // 2, thumbnail_y + thumbnail_height + int(55 * scale_factor)))
             self.screen.blit(hint_surface, hint_rect)
         
         # 角色选择按钮 - 相对于屏幕高度的79%位置
@@ -3063,10 +4368,7 @@ class Game:
             self.game_mode = ONLINE  # 设置为在线模式
             
             # 将房主自己加入玩家列表
-            if isinstance(self.room_players, list):
-                self.room_players = [{'name': self.player_name or '房主', 'character': '未选择', 'ping': 0}]
-            else:
-                self.room_players = {'host': {'name': self.player_name or '房主', 'character': '未选择', 'ping': 0}}
+            self.room_players = {'host': {'name': self.player_name or '房主', 'character': '未选择', 'ping': 0}}
             
             print(f"本地服务器已启动: {local_ip}:{port}")
             return True
@@ -3135,7 +4437,9 @@ class Game:
         if not self.network_client or not self.network_client.other_players:
             return
         
-        for player_id, player_data in self.network_client.other_players.items():
+        # 创建字典副本以避免迭代时修改导致的错误
+        other_players_copy = dict(self.network_client.other_players)
+        for player_id, player_data in other_players_copy.items():
             # 获取玩家相对位置并转换为绝对坐标
             rel_x = player_data.get('rel_x', player_data.get('x', 0) / WIDTH if 'x' in player_data else 0)
             rel_y = player_data.get('rel_y', player_data.get('y', 0) / HEIGHT if 'y' in player_data else 0)
@@ -3178,8 +4482,8 @@ class Game:
                             # 确保帧索引在有效范围内
                             safe_frame_index = frame_index % len(frames)
                             other_player_surface = frames[safe_frame_index]
-                            # 缩放到合适大小
-                            other_player_surface = pygame.transform.scale(other_player_surface, (64, 64))
+                            # 缩放到与本地玩家相同的大小
+                            other_player_surface = pygame.transform.scale(other_player_surface, (96, 96))
             except Exception as e:
                 print(f"加载其他玩家角色动画失败: {e}")
                 import traceback
@@ -3187,15 +4491,19 @@ class Game:
             
             # 如果加载失败，使用默认的红色方块
             if other_player_surface is None:
-                other_player_surface = pygame.Surface((64, 64))
+                other_player_surface = pygame.Surface((96, 96))
                 other_player_surface.fill((255, 100, 100))  # 红色表示其他玩家
                 # 添加简单的眼睛
-                pygame.draw.circle(other_player_surface, BLACK, (20, 20), 3)
-                pygame.draw.circle(other_player_surface, BLACK, (44, 20), 3)
+                pygame.draw.circle(other_player_surface, BLACK, (30, 30), 4)
+                pygame.draw.circle(other_player_surface, BLACK, (66, 30), 4)
             
             # 根据朝向翻转
             if not facing_right:
                 other_player_surface = pygame.transform.flip(other_player_surface, True, False)
+            
+            # 记录其他玩家位置作为脏矩形
+            other_player_rect = pygame.Rect(x - 10, y - 30, 116, 126)  # 包含玩家和名称文本
+            self.add_dirty_rect(other_player_rect)
             
             self.screen.blit(other_player_surface, (x, y))
             
@@ -3206,46 +4514,81 @@ class Game:
             id_text = font_small.render(display_name, True, WHITE)
             self.screen.blit(id_text, (x, y - 20))
     
-    def load_available_maps(self):
-        """加载可用的地图列表"""
+    def load_available_map_series(self):
+        """加载可用的地图系列列表"""
         map_dir = "map"
-        self.available_maps = []
+        self.available_map_series = []
         
         if os.path.exists(map_dir):
-            for filename in os.listdir(map_dir):
-                if filename.endswith('.json'):
-                    map_path = os.path.join(map_dir, filename)
-                    try:
-                        with open(map_path, 'r', encoding='utf-8') as f:
-                            map_data = json.load(f)
-                            map_data['filename'] = filename
-                            self.available_maps.append(map_data)
-                            print(f"加载地图: {map_data['name']}")
-                    except Exception as e:
-                        print(f"加载地图文件 {filename} 失败: {e}")
+            for series_name in os.listdir(map_dir):
+                series_path = os.path.join(map_dir, series_name)
+                if os.path.isdir(series_path):
+                    series_info_path = os.path.join(series_path, "series_info.json")
+                    if os.path.exists(series_info_path):
+                        try:
+                            with open(series_info_path, 'r', encoding='utf-8') as f:
+                                series_data = json.load(f)
+                                series_data['series_folder'] = series_name
+                                
+                                # 加载系列中的所有关卡
+                                levels = []
+                                for level_info in series_data['levels']:
+                                    level_path = os.path.join(series_path, level_info['file'])
+                                    if os.path.exists(level_path):
+                                        with open(level_path, 'r', encoding='utf-8') as lf:
+                                            level_data = json.load(lf)
+                                            level_data['level_id'] = level_info['level_id']
+                                            level_data['level_name'] = level_info['name']
+                                            level_data['level_description'] = level_info['description']
+                                            level_data['filename'] = level_info['file']
+                                            levels.append(level_data)
+                                
+                                series_data['loaded_levels'] = levels
+                                self.available_map_series.append(series_data)
+                                print(f"加载地图系列: {series_data['series_name']} ({len(levels)}个关卡)")
+                        except Exception as e:
+                            print(f"加载地图系列 {series_name} 失败: {e}")
         
-        # 如果没有找到地图文件，创建默认地图
-        if not self.available_maps:
-            self.create_default_map()
+        # 如果没有找到地图系列，创建默认地图
+        if not self.available_map_series:
+            self.create_default_map_series()
     
-    def create_default_map(self):
-        """创建默认地图数据"""
-        default_map = {
-            "name": "默认地图",
-            "description": "系统默认地图",
-            "background_color": [135, 206, 235],
-            "platforms": [
-                {"x": 0, "y": "HEIGHT - 50", "width": "WIDTH", "height": 50, "type": "ground"},
-                {"x": 300, "y": "HEIGHT - 150", "width": 200, "height": 32, "type": "platform"},
-                {"x": 600, "y": "HEIGHT - 250", "width": 200, "height": 32, "type": "platform"},
-                {"x": 900, "y": "HEIGHT - 180", "width": 200, "height": 32, "type": "platform"},
-                {"x": 150, "y": "HEIGHT - 300", "width": 150, "height": 32, "type": "platform"},
-                {"x": 750, "y": "HEIGHT - 350", "width": 150, "height": 32, "type": "platform"}
+    def create_default_map_series(self):
+        """创建默认地图系列"""
+        default_series = {
+            "series_name": "默认系列",
+            "description": "默认地图系列",
+            "series_folder": "default_series",
+            "levels": [
+                {
+                    "level_id": 1,
+                    "name": "默认关卡",
+                    "description": "默认关卡描述",
+                    "file": "default.json"
+                }
             ],
-            "spawn_point": {"x": 100, "y": "HEIGHT - 200"},
-            "filename": "default.json"
+            "loaded_levels": [
+                {
+                    "name": "默认地图",
+                    "description": "系统默认地图",
+                    "background_color": [135, 206, 235],
+                    "platforms": [
+                        {"x": 0, "y": "HEIGHT - 50", "width": "WIDTH", "height": 50, "type": "ground"},
+                        {"x": 300, "y": "HEIGHT - 150", "width": 200, "height": 32, "type": "platform"},
+                        {"x": 600, "y": "HEIGHT - 250", "width": 200, "height": 32, "type": "platform"},
+                        {"x": 900, "y": "HEIGHT - 180", "width": 200, "height": 32, "type": "platform"},
+                        {"x": 150, "y": "HEIGHT - 300", "width": 150, "height": 32, "type": "platform"},
+                        {"x": 750, "y": "HEIGHT - 350", "width": 150, "height": 32, "type": "platform"}
+                    ],
+                    "spawn_point": {"x": 100, "y": "HEIGHT - 200"},
+                    "level_id": 1,
+                    "level_name": "默认关卡",
+                    "level_description": "默认关卡描述",
+                    "filename": "default.json"
+                }
+            ]
         }
-        self.available_maps.append(default_map)
+        self.available_map_series.append(default_series)
     
     def create_platforms_from_map(self, map_data):
         """根据地图数据创建平台"""
@@ -3262,6 +4605,347 @@ class Game:
             platforms.append(platform)
         
         return platforms
+    
+    def create_portals_from_map(self, map_data):
+        """根据地图数据创建传送门"""
+        portals = []
+        
+        portal_data_list = map_data.get('portals', [])
+        for portal_data in portal_data_list:
+            # 解析坐标和尺寸，支持字符串表达式
+            x = self.parse_coordinate(portal_data['x'])
+            y = self.parse_coordinate(portal_data['y'])
+            width = portal_data['width']
+            height = portal_data['height']
+            target_map = portal_data['target_map']
+            portal_type = portal_data.get('type', 'level_portal')
+            
+            portal = Portal(x, y, width, height, target_map, portal_type)
+            portals.append(portal)
+        
+        return portals
+    
+    def create_enemies_from_map(self, map_data):
+        """从地图数据创建敌怪（仅单机模式使用）"""
+        enemies = []
+        if 'enemies' in map_data:
+            for i, enemy_data in enumerate(map_data['enemies']):
+                try:
+                    # 解析坐标
+                    enemy_data['x'] = self.parse_coordinate(enemy_data['x'])
+                    enemy_data['y'] = self.parse_coordinate(enemy_data['y'])
+                    
+                    # 创建敌怪
+                    enemy = Enemy(enemy_data)
+                    enemies.append(enemy)
+                    print(f"单机模式创建敌怪: {enemy_data['type']} ({enemy_data['variant']}) 位置({enemy_data['x']}, {enemy_data['y']}) ID: {enemy.enemy_id}")
+                except Exception as e:
+                    print(f"创建敌怪失败: {e}, 数据: {enemy_data}")
+        return enemies
+    
+    def check_portal_collisions(self):
+        """检查玩家与传送门的碰撞"""
+        if not self.player:
+            return
+            
+        for portal in self.portals:
+            if self.player.rect.colliderect(portal.rect):
+                # 检查是否还有敌人存在
+                if len(self.enemies) > 0:
+                    # 显示需要清除所有敌人的提示
+                    self.show_clear_enemies_message(portal)
+                    continue
+                
+                # 在多人联机模式下，需要检查所有玩家是否都触碰到传送门
+                if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                    if self.check_all_players_at_portal(portal):
+                        # 只有房主可以触发传送
+                        if self.network_client.is_host:
+                            print("所有玩家都在传送门附近，房主发送传送门触发信号")
+                            self.network_client.send_portal_trigger(portal.target_map)
+                            # 房主也立即执行传送
+                            self.teleport_to_map(portal.target_map)
+                        break
+                    else:
+                        # 显示等待其他玩家的提示
+                        self.show_portal_waiting_message(portal)
+                        break
+                else:
+                    # 单人模式直接传送
+                    self.teleport_to_map(portal.target_map)
+                    break
+    
+    def check_all_players_at_portal(self, portal):
+        """检查所有玩家是否都在传送门附近"""
+        if not self.network_client or not self.network_client.other_players:
+            # 如果没有其他玩家，只需要当前玩家在传送门即可
+            return True
+        
+        # 扩大传送门检测范围，考虑角色大小和网络延迟
+        portal_buffer = 32  # 额外的缓冲区域
+        expanded_portal = pygame.Rect(
+            portal.rect.x - portal_buffer,
+            portal.rect.y - portal_buffer,
+            portal.rect.width + portal_buffer * 2,
+            portal.rect.height + portal_buffer * 2
+        )
+        
+        # 检查所有其他玩家是否都在扩大的传送门区域内
+        for player_id, player_data in self.network_client.other_players.items():
+            # 获取其他玩家的位置
+            rel_x = player_data.get('rel_x', 0)
+            rel_y = player_data.get('rel_y', 0)
+            x, y = self.relative_to_absolute(rel_x, rel_y)
+            
+            # 创建其他玩家的矩形（考虑角色大小）
+            player_rect = pygame.Rect(x, y, 64, 64)  # 假设角色大小为64x64
+            
+            # 如果有玩家不在传送门区域内，返回False
+            if not player_rect.colliderect(expanded_portal):
+                return False
+        
+        return True
+    
+    def show_clear_enemies_message(self, portal):
+        """显示需要清除所有敌人的消息"""
+        font = self.get_chinese_font(28)
+        enemy_count = len(self.enemies)
+        message_text = f"需要清除所有敌人才能使用传送门 (剩余: {enemy_count})"
+        text_surface = font.render(message_text, True, (255, 100, 100))
+        
+        # 在传送门上方显示消息
+        text_rect = text_surface.get_rect(center=(portal.rect.centerx, portal.rect.y - 40))
+        
+        # 添加半透明背景
+        bg_rect = text_rect.inflate(20, 10)
+        bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
+        bg_surface.set_alpha(150)
+        bg_surface.fill((0, 0, 0))
+        self.screen.blit(bg_surface, bg_rect)
+        
+        self.screen.blit(text_surface, text_rect)
+    
+    def show_portal_waiting_message(self, portal=None):
+        """显示等待其他玩家的消息"""
+        # 在屏幕中央显示等待消息
+        font = self.get_chinese_font(32)
+        message_text = "等待其他玩家到达传送门..."
+        text_surface = font.render(message_text, True, (255, 255, 0))
+        
+        # 如果有传送门参数，在传送门上方显示；否则在屏幕中央显示
+        if portal:
+            text_rect = text_surface.get_rect(center=(portal.rect.centerx, portal.rect.y - 30))
+        else:
+            text_rect = text_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        
+        # 添加半透明背景
+        bg_rect = text_rect.inflate(20, 10)
+        bg_surface = pygame.Surface((bg_rect.width, bg_rect.height))
+        bg_surface.set_alpha(128)
+        bg_surface.fill((0, 0, 0))
+        self.screen.blit(bg_surface, bg_rect)
+        
+        self.screen.blit(text_surface, text_rect)
+    
+    def show_game_over(self):
+        """显示游戏结束界面并返回房间"""
+        # 显示游戏结束消息
+        font_large = self.get_chinese_font(48)
+        font_medium = self.get_chinese_font(32)
+        
+        # 创建半透明覆盖层
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        
+        # 游戏结束标题
+        game_over_text = font_large.render("游戏结束", True, (255, 0, 0))
+        game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 100))
+        self.screen.blit(game_over_text, game_over_rect)
+        
+        # 提示信息
+        info_text = font_medium.render("你的血量已归零", True, WHITE)
+        info_rect = info_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+        self.screen.blit(info_text, info_rect)
+        
+        # 返回提示
+        return_text = font_medium.render("3秒后自动返回房间...", True, (255, 255, 0))
+        return_rect = return_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+        self.screen.blit(return_text, return_rect)
+        
+        # 更新显示
+        pygame.display.flip()
+        
+        # 等待3秒
+        pygame.time.wait(3000)
+        
+        # 返回房间逻辑
+        self.return_to_room()
+    
+    def return_to_room(self):
+        """返回房间的逻辑"""
+        print("玩家死亡，返回房间")
+        
+        # 根据当前游戏模式决定返回位置
+        if self.game_mode == OFFLINE:
+            # 单机模式，返回主菜单
+            self.cleanup_game()
+            self.state = MAIN_MENU
+            print("返回主菜单")
+        elif self.game_mode == ONLINE:
+            # 联机模式，返回等待房间
+            if self.mode == HOST_ROOM:
+                # 房主返回等待房间
+                self.state = WAITING_ROOM
+                # 切换回菜单音乐
+                self.play_music('menu')
+                # 清理游戏状态但保持网络连接
+                self.player = None
+                self.platforms = None
+                self.enemies = []
+                self.portals = []
+                # 重置网络客户端的游戏开始标志，防止自动重新开始游戏
+                if self.network_client:
+                    self.network_client.game_started = False
+                print("房主返回等待房间")
+            else:
+                # 普通玩家返回等待房间
+                self.state = WAITING_ROOM
+                # 切换回菜单音乐
+                self.play_music('menu')
+                # 清理游戏状态但保持网络连接
+                self.player = None
+                self.platforms = None
+                self.enemies = []
+                self.portals = []
+                # 重置网络客户端的游戏开始标志，防止自动重新开始游戏
+                if self.network_client:
+                    self.network_client.game_started = False
+                print("玩家返回等待房间")
+
+    
+    def teleport_to_map(self, target_map):
+        """传送到目标地图或下一个关卡"""
+        print(f"传送到地图: {target_map}")
+        
+        # 如果target_map是"next_level"，则传送到当前系列的下一个关卡
+        if target_map == "next_level":
+            if self.available_map_series and self.selected_series < len(self.available_map_series):
+                current_series = self.available_map_series[self.selected_series]
+                print(f"当前关卡索引: {self.selected_level}, 系列总关卡数: {len(current_series['loaded_levels'])}")
+                next_level = self.selected_level + 1
+                
+                if next_level < len(current_series['loaded_levels']):
+                    # 传送到下一个关卡
+                    self.selected_level = next_level
+                    map_data = current_series['loaded_levels'][self.selected_level]
+                    
+                    print(f"传送到下一关卡: {current_series['series_name']} - {map_data['level_name']} (索引: {self.selected_level})")
+                    
+                    # 更新当前地图
+                    self.current_map_data = map_data
+                    self.current_map_name = map_data.get('level_name', f"level_{self.selected_level}")
+                    
+                    # 重新创建平台、传送门和敌怪
+                    self.platforms = self.create_platforms_from_map(map_data)
+                    self.portals = self.create_portals_from_map(map_data)
+                    self.enemies = self.create_enemies_from_map(map_data)
+                    
+                    # 重置玩家位置到新地图的出生点
+                    spawn_x, spawn_y = self.get_spawn_point_from_map(map_data)
+                    self.player.x = spawn_x
+                    self.player.y = spawn_y
+                    self.player.rect.x = self.player.x
+                    self.player.rect.y = self.player.y
+                    self.player.vel_x = 0
+                    self.player.vel_y = 0
+                    self.player.on_ground = False
+                    
+                    # 如果是联机模式，通知其他玩家关卡切换
+                    if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                        # 发送地图选择更新
+                        self.network_client.send_map_selection(self.selected_series * 100 + self.selected_level, 
+                                                             f"{current_series['series_name']} - {map_data['level_name']}")
+                        
+                        # 发送更新后的玩家位置
+                        rel_x, rel_y = self.absolute_to_relative(self.player.x, self.player.y)
+                        player_data = {
+                            'rel_x': rel_x,
+                            'rel_y': rel_y,
+                            'facing_right': self.player.facing_right,
+                            'on_ground': self.player.on_ground,
+                            'player_name': self.player_name,
+                            'character_name': self.character_options[self.selected_character]['name'] if self.character_selected else "未选择"
+                        }
+                        self.network_client.send_player_data(player_data)
+                    
+                    return
+                else:
+                    print("已经是最后一个关卡了！")
+                    return
+            else:
+                print("没有可用的地图系列！")
+                return
+        
+        # 原有的地图文件加载逻辑（保持向后兼容）
+        if isinstance(target_map, int):
+            target_map_file = f"map{target_map}"
+        else:
+            target_map_file = target_map
+        
+        # 加载目标地图
+        try:
+            map_path = f'map/{target_map_file}.json'
+            with open(map_path, 'r', encoding='utf-8') as f:
+                map_data = json.load(f)
+            
+            # 更新当前地图
+            self.current_map_data = map_data
+            
+            # 重新创建平台和传送门
+            self.platforms = self.create_platforms_from_map(map_data)
+            self.portals = self.create_portals_from_map(map_data)
+            
+            # 重置玩家位置到新地图的出生点
+            spawn_x, spawn_y = self.get_spawn_point_from_map(map_data)
+            self.player.x = spawn_x
+            self.player.y = spawn_y
+            self.player.rect.x = self.player.x
+            self.player.rect.y = self.player.y
+            self.player.vel_x = 0
+            self.player.vel_y = 0
+            self.player.on_ground = False
+            
+            # 如果是联机模式，通知其他玩家地图切换
+            if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                # 发送地图切换消息
+                map_change_data = {
+                    'type': 'map_change',
+                    'target_map': target_map_file
+                }
+                self.network_client.send_message(map_change_data)
+                
+                # 发送更新后的玩家位置
+                rel_x, rel_y = self.absolute_to_relative(self.player.x, self.player.y)
+                player_data = {
+                    'rel_x': rel_x,
+                    'rel_y': rel_y,
+                    'facing_right': self.player.facing_right,
+                    'on_ground': self.player.on_ground,
+                    'player_name': self.player_name,
+                    'character_name': self.character_options[self.selected_character]['name'] if self.character_selected else "未选择"
+                }
+                self.network_client.send_player_data(player_data)
+            
+            print(f"成功传送到地图: {map_data['name']}")
+            
+        except FileNotFoundError:
+            print(f"错误: 找不到地图文件 {map_path}")
+        except json.JSONDecodeError:
+            print(f"错误: 地图文件 {map_path} 格式错误")
+        except Exception as e:
+            print(f"传送时发生错误: {e}")
     
     def parse_coordinate(self, coord):
         """解析坐标值，支持WIDTH和HEIGHT变量"""
@@ -3347,7 +5031,9 @@ class Game:
         return pygame.Rect(x, y, width, height)
     
     def restart_game(self):
-        self.player = Player(100, HEIGHT - 200)
+        # 使用当前地图的spawn点重新创建玩家
+        spawn_point = self.get_spawn_point_from_map(self.current_map)
+        self.player = Player(spawn_point['x'], spawn_point['y'])
         self.state = PLAYING
     
     def run(self):

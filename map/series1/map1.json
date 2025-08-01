@@ -1,0 +1,225 @@
+{
+  "name": "经典平台",
+  "description": "经典的多层平台地图，适合新手练习",
+  "background_color": [135, 206, 235],
+  "platforms": [
+    {
+      "x": 0,
+      "y": "HEIGHT - 75",
+      "width": "WIDTH",
+      "height": 75,
+      "type": "ground"
+    },
+    {
+      "x": 200,
+      "y": "HEIGHT - 200",
+      "width": 300,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 600,
+      "y": "HEIGHT - 320",
+      "width": 300,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1100,
+      "y": "HEIGHT - 250",
+      "width": 300,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1500,
+      "y": "HEIGHT - 400",
+      "width": 250,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 100,
+      "y": "HEIGHT - 450",
+      "width": 250,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 800,
+      "y": "HEIGHT - 500",
+      "width": 250,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1300,
+      "y": "HEIGHT - 550",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 400,
+      "y": "HEIGHT - 600",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1600,
+      "y": "HEIGHT - 650",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    }
+  ],
+  "portals": [
+    {
+      "x": 1750,
+      "y": "HEIGHT - 175",
+      "width": 64,
+      "height": 96,
+      "target_map": "next_level",
+      "type": "level_portal"
+    }
+  ],
+  "spawn_point": {
+    "x": 100,
+    "y": "HEIGHT - 200"
+  },
+  "enemies": [
+    {
+      "type": "slime",
+      "variant": "blue",
+      "x": 300,
+      "y": "HEIGHT - 175",
+      "patrol_range": 150,
+      "aggro_range": 500,
+      "health": 20,
+      "attack_power": 10,
+      "speed": 2,
+      "jump_strength": 15
+    },
+    {
+      "type": "slime",
+      "variant": "blue",
+      "x": 800,
+      "y": "HEIGHT - 175",
+      "patrol_range": 150,
+      "aggro_range": 200,
+      "health": 20,
+      "attack_power": 10,
+      "speed": 2,
+      "jump_strength": 15
+    },
+    {
+      "type": "slime",
+      "variant": "green",
+      "x": 500,
+      "y": "HEIGHT - 300",
+      "patrol_range": 120,
+      "aggro_range": 500,
+      "health": 20,
+      "attack_power": 10,
+      "speed": 1.8,
+      "jump_strength": 18
+    },
+    {
+      "type": "slime",
+      "variant": "green",
+      "x": 1200,
+      "y": "HEIGHT - 300",
+      "patrol_range": 120,
+      "aggro_range": 180,
+      "health": 25,
+      "attack_power": 10,
+      "speed": 1.8,
+      "jump_strength": 18
+    },
+    {
+      "type": "slime",
+      "variant": "lava",
+      "x": 1000,
+      "y": "HEIGHT - 175",
+      "patrol_range": 100,
+      "aggro_range": 500,
+      "health": 20,
+      "attack_power": 10,
+      "speed": 1.5,
+      "jump_strength": 20
+    },
+    {
+      "type": "slime",
+      "variant": "lava",
+      "x": 1600,
+      "y": "HEIGHT - 175",
+      "patrol_range": 100,
+      "aggro_range": 220,
+      "health": 50,
+      "attack_power": 10,
+      "speed": 1.5,
+      "jump_strength": 20
+    },
+    {
+      "type": "spider",
+      "variant": "ground_static",
+      "x": 400,
+      "y": "HEIGHT - 700",
+      "patrol_range": 0,
+      "aggro_range": 500,
+      "health": 25,
+      "attack_power": 20,
+      "speed": 0
+    },
+    {
+      "type": "spider",
+      "variant": "ground_crawling",
+      "x": 700,
+      "y": "HEIGHT - 175",
+      "patrol_range": 200,
+      "aggro_range": 180,
+      "health": 25,
+      "attack_power": 20,
+      "speed": 3
+    },
+    {
+      "type": "spider",
+      "variant": "wall_crawling",
+      "x": 1400,
+      "y": "HEIGHT - 300",
+      "patrol_range": 150,
+      "aggro_range": 200,
+      "health": 40,
+      "attack_power": 20,
+      "speed": 2.5,
+      "wall_crawl": true
+    },
+    {
+      "type": "vulture",
+      "variant": "flying",
+      "x": 600,
+      "y": "HEIGHT - 450",
+      "patrol_range": 300,
+      "aggro_range": 500,
+      "health": 15,
+      "attack_power": 15,
+      "speed": 4,
+      "flight_height_min": "HEIGHT - 600",
+      "flight_height_max": "HEIGHT - 300"
+    },
+    {
+      "type": "vulture",
+      "variant": "flying",
+      "x": 1300,
+      "y": "HEIGHT - 450",
+      "patrol_range": 300,
+      "aggro_range": 250,
+      "health": 15,
+      "attack_power": 15,
+      "speed": 4,
+      "flight_height_min": "HEIGHT - 700",
+      "flight_height_max": "HEIGHT - 400"
+    }
+  ]
+}

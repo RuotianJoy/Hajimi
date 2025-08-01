@@ -1,0 +1,24 @@
+{
+  "series_name": "经典冒险",
+  "description": "经典的平台跳跃冒险，包含三个精心设计的关卡",
+  "levels": [
+    {
+      "level_id": 1,
+      "file": "map1.json",
+      "name": "经典平台",
+      "description": "基础平台跳跃关卡"
+    },
+    {
+      "level_id": 2,
+      "file": "map2.json",
+      "name": "跳跃挑战",
+      "description": "测试你的跳跃技巧"
+    },
+    {
+      "level_id": 3,
+      "file": "mapfinal.json",
+      "name": "终点站",
+      "description": "恭喜通关！这里是你的终点"
+    }
+  ]
+}
