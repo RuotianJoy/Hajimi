@@ -1278,11 +1278,6 @@ class Game:
         
         # 传送门相关
         self.portal_message_timer = 0  # 传送门等待消息显示计时器
-        
-        # 脏矩形更新相关
-        self.dirty_rects = []  # 存储需要更新的矩形区域
-        self.use_dirty_rects = True  # 是否启用脏矩形更新
-        self.last_frame_objects = {}  # 存储上一帧的对象位置信息
         self.input_field = "ip"  # "ip" 或 "port"
         self.last_character_send_time = 0  # 上次发送角色选择信息的时间
         
@@ -2667,9 +2662,6 @@ class Game:
             self.update_crawling_animations()
     
     def draw(self):
-        # 清空脏矩形列表
-        self.dirty_rects = []
-        
         if self.state == MAIN_MENU:
             self.draw_main_menu()
         elif self.state == MODE_SELECT:
@@ -2689,51 +2681,10 @@ class Game:
         elif self.state in [PLAYING, PAUSED]:
             self.draw_game()
         
-        # 游戏状态下使用混合更新策略：背景全屏更新，动态对象脏矩形更新
-        if self.state in [PLAYING, PAUSED]:
-            # 游戏状态下始终使用全屏更新，避免地图拖影问题
-            pygame.display.flip()
-        else:
-            # 菜单界面使用全屏更新
-            pygame.display.flip()
-    
-    def optimize_dirty_rects(self, rects):
-        """优化脏矩形列表，合并重叠的矩形"""
-        if not rects:
-            return []
-        
-        # 移除重复的矩形（通过比较矩形的坐标和尺寸）
-        unique_rects = []
-        for rect in rects:
-            is_duplicate = False
-            for existing_rect in unique_rects:
-                if (rect.x == existing_rect.x and rect.y == existing_rect.y and 
-                    rect.width == existing_rect.width and rect.height == existing_rect.height):
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
-                unique_rects.append(rect)
-        
-        # 简单的合并策略：如果矩形数量较少，直接返回
-        if len(unique_rects) <= 3:
-            return unique_rects
-        
-        # 如果脏矩形过多，返回全屏更新
-        if len(unique_rects) > 20:
-            return [pygame.Rect(0, 0, self.screen.get_width(), self.screen.get_height())]
-        
-        return unique_rects
-    
-    def add_dirty_rect(self, rect):
-        """添加脏矩形区域"""
-        if rect and self.use_dirty_rects:
-            # 确保矩形在屏幕范围内
-            clipped_rect = rect.clip(pygame.Rect(0, 0, self.screen.get_width(), self.screen.get_height()))
-            if clipped_rect.width > 0 and clipped_rect.height > 0:
-                self.dirty_rects.append(clipped_rect)
+        pygame.display.flip()
     
     def draw_game(self):
-        # 绘制背景，确保覆盖整个屏幕（背景不使用脏矩形，避免拖影）
+        # 绘制背景，确保覆盖整个屏幕
         if self.background:
             # 如果背景尺寸与当前屏幕尺寸不匹配，重新缩放
             if self.background.get_size() != (WIDTH, HEIGHT):
@@ -2742,35 +2693,27 @@ class Game:
         else:
             self.screen.fill((135, 206, 235))  # 天蓝色背景
         
-        # 绘制平台（静态元素不使用脏矩形）
+        # 绘制平台
         for platform in self.platforms:
             platform.draw(self.screen)
         
-        # 绘制传送门（静态元素不使用脏矩形）
+        # 绘制传送门
         for portal in self.portals:
             portal.draw(self.screen)
         
-        # 绘制敌怪并记录脏矩形
+        # 绘制敌怪
         for enemy in self.enemies:
-            # 记录敌怪当前位置作为脏矩形
-            enemy_rect = pygame.Rect(enemy.x - 10, enemy.y - 10, enemy.width + 20, enemy.height + 20)
-            self.add_dirty_rect(enemy_rect)
             enemy.draw(self.screen)
         
-        # 绘制玩家并记录脏矩形
-        player_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, self.player.width + 20, self.player.height + 20)
-        self.add_dirty_rect(player_rect)
+        # 绘制玩家
         self.player.draw(self.screen)
         
-        # 绘制弹幕并记录脏矩形
+        # 绘制弹幕
         if hasattr(self, 'projectiles'):
             for projectile in self.projectiles:
-                # 记录弹幕位置作为脏矩形
-                proj_rect = pygame.Rect(projectile.x - 5, projectile.y - 5, 20, 20)
-                self.add_dirty_rect(proj_rect)
                 projectile.draw(self.screen)
         
-        # 绘制其他玩家并记录脏矩形
+        # 绘制其他玩家
         if self.network_client:
             self.draw_other_players()
         
@@ -4500,10 +4443,6 @@ class Game:
             # 根据朝向翻转
             if not facing_right:
                 other_player_surface = pygame.transform.flip(other_player_surface, True, False)
-            
-            # 记录其他玩家位置作为脏矩形
-            other_player_rect = pygame.Rect(x - 10, y - 30, 116, 126)  # 包含玩家和名称文本
-            self.add_dirty_rect(other_player_rect)
             
             self.screen.blit(other_player_surface, (x, y))
             
