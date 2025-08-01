@@ -12,7 +12,7 @@
     },
     {
       "x": 200,
-      "y": "HEIGHT - 200",
+      "y": "HEIGHT - 250",
       "width": 300,
       "height": 48,
       "type": "platform"
@@ -72,6 +72,13 @@
       "width": 200,
       "height": 48,
       "type": "platform"
+    },
+    {
+      "x": 200,
+      "y": "HEIGHT - 800",
+      "width": 300,
+      "height": 48,
+      "type": "platform"
     }
   ],
   "portals": [
@@ -80,108 +87,25 @@
       "y": "HEIGHT - 175",
       "width": 64,
       "height": 96,
-      "target_map": "next_level",
+      "target_map": "series1/map2",
       "type": "level_portal"
     }
   ],
   "spawn_point": {
-    "x": 100,
-    "y": "HEIGHT - 200"
+    "x": 250,
+    "y": "HEIGHT - 850"
   },
   "enemies": [
-    {
-      "type": "slime",
-      "variant": "blue",
-      "x": 300,
-      "y": "HEIGHT - 175",
-      "patrol_range": 150,
-      "aggro_range": 500,
-      "health": 20,
-      "attack_power": 10,
-      "speed": 2,
-      "jump_strength": 15
-    },
-    {
-      "type": "slime",
-      "variant": "blue",
-      "x": 800,
-      "y": "HEIGHT - 175",
-      "patrol_range": 150,
-      "aggro_range": 200,
-      "health": 20,
-      "attack_power": 10,
-      "speed": 2,
-      "jump_strength": 15
-    },
-    {
-      "type": "slime",
-      "variant": "green",
-      "x": 500,
-      "y": "HEIGHT - 300",
-      "patrol_range": 120,
-      "aggro_range": 500,
-      "health": 20,
-      "attack_power": 10,
-      "speed": 1.8,
-      "jump_strength": 18
-    },
-    {
-      "type": "slime",
-      "variant": "green",
-      "x": 1200,
-      "y": "HEIGHT - 300",
-      "patrol_range": 120,
-      "aggro_range": 180,
-      "health": 25,
-      "attack_power": 10,
-      "speed": 1.8,
-      "jump_strength": 18
-    },
-    {
-      "type": "slime",
-      "variant": "lava",
-      "x": 1000,
-      "y": "HEIGHT - 175",
-      "patrol_range": 100,
-      "aggro_range": 500,
-      "health": 20,
-      "attack_power": 10,
-      "speed": 1.5,
-      "jump_strength": 20
-    },
-    {
-      "type": "slime",
-      "variant": "lava",
-      "x": 1600,
-      "y": "HEIGHT - 175",
-      "patrol_range": 100,
-      "aggro_range": 220,
-      "health": 50,
-      "attack_power": 10,
-      "speed": 1.5,
-      "jump_strength": 20
-    },
-    {
-      "type": "spider",
-      "variant": "ground_static",
-      "x": 400,
-      "y": "HEIGHT - 700",
-      "patrol_range": 0,
-      "aggro_range": 500,
-      "health": 25,
-      "attack_power": 20,
-      "speed": 0
-    },
     {
       "type": "spider",
       "variant": "ground_crawling",
       "x": 700,
       "y": "HEIGHT - 175",
       "patrol_range": 200,
-      "aggro_range": 180,
+      "aggro_range": 1000,
       "health": 25,
       "attack_power": 20,
-      "speed": 3
+      "speed": 2.5
     },
     {
       "type": "spider",
@@ -189,7 +113,7 @@
       "x": 1400,
       "y": "HEIGHT - 300",
       "patrol_range": 150,
-      "aggro_range": 200,
+      "aggro_range": 1000,
       "health": 40,
       "attack_power": 20,
       "speed": 2.5,
@@ -201,7 +125,7 @@
       "x": 600,
       "y": "HEIGHT - 450",
       "patrol_range": 300,
-      "aggro_range": 500,
+      "aggro_range": 1000,
       "health": 15,
       "attack_power": 15,
       "speed": 4,
@@ -214,7 +138,7 @@
       "x": 1300,
       "y": "HEIGHT - 450",
       "patrol_range": 300,
-      "aggro_range": 250,
+      "aggro_range": 1000,
       "health": 15,
       "attack_power": 15,
       "speed": 4,

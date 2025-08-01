@@ -1,9 +1,21 @@
 import json
 import os
+import sys
+
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径，兼容开发环境和PyInstaller打包环境"""
+    try:
+        # PyInstaller创建临时文件夹，并将路径存储在_MEIPASS中
+        base_path = sys._MEIPASS
+    except Exception:
+        # 开发环境中使用当前工作目录
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
 
 class CharacterLoader:
     def __init__(self, character_dir="character/"):
-        self.character_dir = character_dir
+        self.character_dir = get_resource_path(character_dir)
         self.characters = {}
         self.character_index = []
         self.load_characters()
@@ -54,7 +66,7 @@ class CharacterLoader:
                     "max_health": 100
                 },
                 "animations": {
-                    "gif_folder": "gif/CharacterOne/"
+                    "gif_folder": get_resource_path("gif/CharacterOne/")
                 }
             },
             "hajiyang": {
@@ -70,7 +82,7 @@ class CharacterLoader:
                     "max_health": 80
                 },
                 "animations": {
-                    "gif_folder": "gif/CharacterThree/"
+                    "gif_folder": get_resource_path("gif/CharacterThree/")
                 }
             }
         }
@@ -91,7 +103,7 @@ class CharacterLoader:
                         "name": char_data["name"],
                         "color": tuple(char_data["color"]),
                         "description": char_data["description"],
-                        "gif_folder": char_data["animations"]["gif_folder"]
+                        "gif_folder": get_resource_path(char_data["animations"]["gif_folder"])
                     })
         return options
     

@@ -4,10 +4,30 @@ import json
 import time
 import math
 import uuid
+import os
+import sys
+import zlib
+import base64
 from typing import Dict, Any, Optional
 
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径，兼容开发环境和PyInstaller打包环境"""
+    try:
+        # PyInstaller创建临时文件夹，并将路径存储在_MEIPASS中
+        base_path = sys._MEIPASS
+    except Exception:
+        # 开发环境中使用脚本所在目录
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+
 class NetworkClient:
-    def __init__(self, host='localhost', port=12345):
+    # 数据包大小优化常量
+    MAX_PACKET_SIZE = 1400  # 推荐的最大TCP包大小
+    COMPRESSION_THRESHOLD = 500  # 超过此大小的数据包将被压缩
+    CHUNK_SIZE = 1200  # 拆包时每个分片的大小
+    
+    def __init__(self, host='localhost', port=12345, logger=None):
         self.host = host
         self.port = port
         self.socket = None
@@ -30,6 +50,10 @@ class NetworkClient:
         self.enemies_sync_data = []  # 服务端同步的敌人数据
         self.map_ready = False  # 服务端地图是否准备完成
         self.server_enemies_count = 0  # 服务端敌人数量
+        self.projectiles_sync_data = []  # 服务端同步的弹幕数据
+        self.other_players_projectiles = {}  # 其他玩家的弹幕数据
+        self.nadir_attacks = []  # nadir武器攻击数据
+        self.logger = logger  # 日志记录器
         
     def connect(self, host=None, port=None):
         # 如果提供了参数，则更新host和port
@@ -39,31 +63,178 @@ class NetworkClient:
             self.port = port
             
         try:
+            if self.logger:
+                self.logger.info(f"尝试连接到服务器 {self.host}:{self.port}")
+            
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            # 禁用Nagle算法，减少延迟
+            self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.socket.connect((self.host, self.port))
             self.connected = True
             self.running = True
+            
+            if self.logger:
+                self.logger.info(f"成功连接到服务器 {self.host}:{self.port}")
             
             # 启动接收线程
             receive_thread = threading.Thread(target=self._receive_messages)
             receive_thread.daemon = True
             receive_thread.start()
             
+            if self.logger:
+                self.logger.info("网络接收线程已启动")
+            
             print(f"已连接到服务器 {self.host}:{self.port}")
             return True
         except Exception as e:
-            print(f"连接失败: {e}")
+            if self.logger:
+                from logger import log_exception
+                log_exception(self.logger, e, f"连接到服务器 {self.host}:{self.port} 时")
+            else:
+                print(f"连接失败: {e}")
             return False
     
     def disconnect(self):
+        if self.logger:
+            self.logger.info("开始断开网络连接")
+        
         self.running = False
         self.connected = False
         if self.socket:
             try:
                 self.socket.close()
-            except:
-                pass
-        print("已断开连接")
+                if self.logger:
+                    self.logger.info("网络套接字已关闭")
+            except Exception as e:
+                if self.logger:
+                    from logger import log_exception
+                    log_exception(self.logger, e, "关闭网络套接字时")
+        
+        if self.logger:
+            self.logger.info("网络连接已断开")
+        else:
+            print("已断开连接")
+    
+    def _compress_data(self, data_str):
+        """压缩数据字符串"""
+        try:
+            compressed = zlib.compress(data_str.encode('utf-8'))
+            encoded = base64.b64encode(compressed).decode('ascii')
+            return encoded
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"数据压缩失败: {e}")
+            return data_str
+    
+    def _decompress_data(self, compressed_str):
+        """解压缩数据字符串"""
+        try:
+            decoded = base64.b64decode(compressed_str.encode('ascii'))
+            decompressed = zlib.decompress(decoded).decode('utf-8')
+            return decompressed
+        except Exception as e:
+            if self.logger:
+                self.logger.warning(f"数据解压缩失败: {e}")
+            return compressed_str
+    
+    def _send_optimized_data(self, data):
+        """优化发送数据包，支持压缩和拆包"""
+        if not self.connected:
+            return False
+        
+        try:
+            # 序列化数据
+            json_str = json.dumps(data)
+            data_size = len(json_str.encode('utf-8'))
+            
+            # 检查是否需要压缩
+            if data_size > self.COMPRESSION_THRESHOLD:
+                compressed_data = self._compress_data(json_str)
+                compressed_size = len(compressed_data.encode('utf-8'))
+                
+                # 如果压缩后更小，使用压缩数据
+                if compressed_size < data_size:
+                    packet = {
+                        'type': 'compressed_data',
+                        'compressed': True,
+                        'data': compressed_data,
+                        'original_size': data_size
+                    }
+                    json_str = json.dumps(packet)
+                    if self.logger:
+                        self.logger.debug(f"数据压缩: {data_size} -> {compressed_size} bytes")
+            
+            # 检查是否需要拆包
+            final_size = len(json_str.encode('utf-8'))
+            if final_size > self.MAX_PACKET_SIZE:
+                return self._send_chunked_data(json_str, data.get('type', 'unknown'))
+            else:
+                # 直接发送
+                message = json_str + '\n'
+                self.socket.send(message.encode('utf-8'))
+                if self.logger:
+                    self.logger.debug(f"发送数据包: {final_size} bytes")
+                return True
+                
+        except Exception as e:
+            if self.logger:
+                from logger import log_exception
+                log_exception(self.logger, e, "优化发送数据时")
+            return False
+    
+    def _send_chunked_data(self, data_str, data_type):
+        """拆包发送大数据"""
+        try:
+            chunk_id = str(uuid.uuid4())
+            data_bytes = data_str.encode('utf-8')
+            total_chunks = (len(data_bytes) + self.CHUNK_SIZE - 1) // self.CHUNK_SIZE
+            
+            for i in range(total_chunks):
+                start = i * self.CHUNK_SIZE
+                end = min(start + self.CHUNK_SIZE, len(data_bytes))
+                chunk_data = data_bytes[start:end]
+                
+                chunk_packet = {
+                    'type': 'chunked_data',
+                    'chunk_id': chunk_id,
+                    'chunk_index': i,
+                    'total_chunks': total_chunks,
+                    'data_type': data_type,
+                    'chunk_data': base64.b64encode(chunk_data).decode('ascii')
+                }
+                
+                message = json.dumps(chunk_packet) + '\n'
+                self.socket.send(message.encode('utf-8'))
+                
+                if self.logger:
+                    self.logger.debug(f"发送数据分片 {i+1}/{total_chunks}: {len(chunk_data)} bytes")
+            
+            return True
+            
+        except Exception as e:
+            if self.logger:
+                from logger import log_exception
+                log_exception(self.logger, e, "拆包发送数据时")
+            return False
+    
+    def _process_chunked_message(self, chunks):
+        """处理分块消息"""
+        try:
+            # 重组分块数据
+            combined_data = ''.join(base64.b64decode(chunk['chunk_data']).decode('utf-8') for chunk in sorted(chunks, key=lambda x: x['chunk_index']))
+            
+            # 检查是否压缩
+            if chunks[0].get('compressed', False):
+                message = self._decompress_data(combined_data)
+            else:
+                message = json.loads(combined_data)
+            
+            if message:
+                if self.logger:
+                    self.logger.debug(f"重组分块消息: {message.get('type', '未知类型')}")
+                self._handle_message(message)
+        except Exception as e:
+            print(f"处理分块消息失败: {e}")
     
     def send_player_data(self, player_data):
         if not self.connected:
@@ -88,11 +259,13 @@ class NetworkClient:
                 'timestamp': time.time()
             }
         
-        try:
-            message = json.dumps(data) + '\n'
-            self.socket.send(message.encode('utf-8'))
-        except Exception as e:
-            print(f"发送数据失败: {e}")
+        # 使用优化的发送方法
+        success = self._send_optimized_data(data)
+        if not success:
+            if self.logger:
+                self.logger.warning("发送玩家数据失败")
+            else:
+                print("发送玩家数据失败")
             self.connected = False
     
     def send_character_selection(self, character_name, player_name):
@@ -107,12 +280,11 @@ class NetworkClient:
             'timestamp': time.time()
         }
         
-        try:
-            message = json.dumps(data) + '\n'
-            self.socket.send(message.encode('utf-8'))
+        success = self._send_optimized_data(data)
+        if success:
             print(f"已发送角色选择: {character_name}")
-        except Exception as e:
-            print(f"发送角色选择失败: {e}")
+        else:
+            print(f"发送角色选择失败")
             self.connected = False
     
     def send_game_start(self):
@@ -125,12 +297,11 @@ class NetworkClient:
             'timestamp': time.time()
         }
         
-        try:
-            message = json.dumps(data) + '\n'
-            self.socket.send(message.encode('utf-8'))
+        success = self._send_optimized_data(data)
+        if success:
             print("已发送游戏开始信号")
-        except Exception as e:
-            print(f"发送游戏开始信号失败: {e}")
+        else:
+            print("发送游戏开始信号失败")
             self.connected = False
     
     def send_return_to_waiting_room(self):
@@ -276,11 +447,9 @@ class NetworkClient:
             'timestamp': time.time()
         }
         
-        try:
-            message = json.dumps(data) + '\n'
-            self.socket.send(message.encode('utf-8'))
-        except Exception as e:
-            print(f"批量发送敌人状态更新失败: {e}")
+        success = self._send_optimized_data(data)
+        if not success:
+            print(f"批量发送敌人状态更新失败")
     
     def send_enemy_creation(self, enemy_data):
         """发送敌人创建请求到服务器"""
@@ -321,6 +490,101 @@ class NetworkClient:
             self.connected = False
             self.connected = False
     
+    def send_projectile_create(self, projectile):
+        """发送弹幕创建信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'projectile_create',
+            'projectile_id': projectile.projectile_id,
+            'x': projectile.x,
+            'y': projectile.y,
+            'vel_x': projectile.vel_x,
+            'vel_y': projectile.vel_y,
+            'damage': projectile.damage,
+            'owner_id': projectile.owner_id,
+            'max_bounces': projectile.max_bounces,
+            'max_distance': projectile.max_distance,
+            'weapon_type': projectile.weapon_type,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+            print(f"已发送弹幕创建信号: 弹幕{projectile.projectile_id}")
+        except Exception as e:
+            print(f"发送弹幕创建信号失败: {e}")
+            self.connected = False
+    
+    def send_projectile_update(self, projectile):
+        """发送弹幕更新信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'projectile_update',
+            'projectile_id': projectile.projectile_id,
+            'x': projectile.x,
+            'y': projectile.y,
+            'vel_x': projectile.vel_x,
+            'vel_y': projectile.vel_y,
+            'active': projectile.active,
+            'bounces': projectile.bounces,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+        except Exception as e:
+            print(f"发送弹幕更新信号失败: {e}")
+            self.connected = False
+    
+    def send_projectile_destroy(self, projectile_id):
+        """发送弹幕销毁信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'projectile_destroy',
+            'projectile_id': projectile_id,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+            print(f"已发送弹幕销毁信号: 弹幕{projectile_id}")
+        except Exception as e:
+            print(f"发送弹幕销毁信号失败: {e}")
+            self.connected = False
+    
+    def send_nadir_attack(self, player_x, player_y, direction_x, direction_y, damage):
+        """发送nadir武器攻击信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'nadir_attack',
+            'player_id': self.player_id,
+            'x': player_x,
+            'y': player_y,
+            'direction_x': direction_x,
+            'direction_y': direction_y,
+            'damage': damage,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+            print(f"已发送nadir攻击信号: 玩家{self.player_id}")
+        except Exception as e:
+            print(f"发送nadir攻击信号失败: {e}")
+            self.connected = False
+    
     def send_map_data(self, map_data):
         """发送地图数据到服务端"""
         if not self.connected:
@@ -332,16 +596,16 @@ class NetworkClient:
             'timestamp': time.time()
         }
         
-        try:
-            message = json.dumps(data) + '\n'
-            self.socket.send(message.encode('utf-8'))
+        success = self._send_optimized_data(data)
+        if success:
             print(f"已发送地图数据: {map_data.get('name', '未知地图')}")
-        except Exception as e:
-            print(f"发送地图数据失败: {e}")
+        else:
+            print(f"发送地图数据失败")
             self.connected = False
     
     def _receive_messages(self):
         buffer = ""
+        chunk_buffer = {}  # 存储分块消息
         
         while self.running and self.connected:
             try:
@@ -353,10 +617,46 @@ class NetworkClient:
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
                     if line.strip():
-                        self._handle_message(json.loads(line))
+                        try:
+                            message = json.loads(line)
+                            
+                            # 检查是否为分块消息
+                            if message.get('type') == 'chunk':
+                                chunk_id = message.get('chunk_id')
+                                if chunk_id not in chunk_buffer:
+                                    chunk_buffer[chunk_id] = []
+                                chunk_buffer[chunk_id].append(message)
+                                
+                                # 检查是否收到所有分块
+                                if len(chunk_buffer[chunk_id]) == message.get('total_chunks'):
+                                    self._process_chunked_message(chunk_buffer[chunk_id])
+                                    del chunk_buffer[chunk_id]
+                            
+                            # 检查是否为压缩消息
+                            elif message.get('compressed', False):
+                                decompressed_message = self._decompress_data(message['data'])
+                                if decompressed_message:
+                                    if self.logger:
+                                        self.logger.debug(f"接收到压缩消息: {decompressed_message.get('type', '未知类型')}")
+                                    self._handle_message(decompressed_message)
+                            
+                            # 普通消息
+                            else:
+                                if self.logger:
+                                    self.logger.debug(f"接收到消息: {message.get('type', '未知类型')}")
+                                self._handle_message(message)
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"JSON解析失败: {e}")
+                        except Exception as e:
+                            print(f"处理消息失败: {e}")
                         
             except Exception as e:
-                print(f"接收消息失败: {e}")
+                if self.logger:
+                    from logger import log_exception
+                    log_exception(self.logger, e, "接收网络消息时")
+                else:
+                    print(f"接收消息失败: {e}")
                 break
         
         self.connected = False
@@ -485,9 +785,8 @@ class NetworkClient:
             # 接收房主的地图切换信号
             target_map = message.get('target_map', '')
             print(f"收到地图切换信号: {target_map}")
-            # 设置传送门触发标志，让游戏主循环处理地图切换
-            self.portal_triggered = True
-            self.portal_target_map = target_map
+            # map_change 消息不应该触发传送门逻辑，因为 portal_trigger 已经处理了传送
+            # 这里只记录日志，避免重复传送
         
         elif msg_type == 'player_death':
             # 接收其他玩家死亡信号
@@ -546,6 +845,64 @@ class NetworkClient:
             self.map_ready = True
             self.server_enemies_count = message.get('enemies_count', 0)
             print(f"服务端地图准备完成: {message.get('map_name', '未知地图')}，敌人数量: {self.server_enemies_count}")
+        
+        elif msg_type == 'projectile_create':
+            # 接收其他玩家创建的弹幕
+            projectile_data = {
+                'projectile_id': message.get('projectile_id', ''),
+                'x': message.get('x', 0),
+                'y': message.get('y', 0),
+                'vel_x': message.get('vel_x', 0),
+                'vel_y': message.get('vel_y', 0),
+                'damage': message.get('damage', 0),
+                'owner_id': message.get('owner_id', ''),
+                'max_bounces': message.get('max_bounces', 3),
+                'max_distance': message.get('max_distance'),
+                'weapon_type': message.get('weapon_type', 'meowmere'),
+                'timestamp': message.get('timestamp', time.time())
+            }
+            if not hasattr(self, 'projectiles_sync_data'):
+                self.projectiles_sync_data = []
+            self.projectiles_sync_data.append(projectile_data)
+            print(f"收到弹幕创建信号: {projectile_data['projectile_id']} (来自玩家 {projectile_data['owner_id']})")
+        
+        elif msg_type == 'projectile_update':
+            # 接收弹幕更新信息
+            projectile_id = message.get('projectile_id', '')
+            if not hasattr(self, 'other_players_projectiles'):
+                self.other_players_projectiles = {}
+            self.other_players_projectiles[projectile_id] = {
+                'x': message.get('x', 0),
+                'y': message.get('y', 0),
+                'vel_x': message.get('vel_x', 0),
+                'vel_y': message.get('vel_y', 0),
+                'active': message.get('active', True),
+                'bounces': message.get('bounces', 0),
+                'timestamp': message.get('timestamp', time.time())
+            }
+        
+        elif msg_type == 'projectile_destroy':
+            # 接收弹幕销毁信号
+            projectile_id = message.get('projectile_id', '')
+            if hasattr(self, 'other_players_projectiles') and projectile_id in self.other_players_projectiles:
+                del self.other_players_projectiles[projectile_id]
+            print(f"收到弹幕销毁信号: {projectile_id}")
+        
+        elif msg_type == 'nadir_attack':
+            # 接收nadir武器攻击信号
+            attack_data = {
+                'player_id': message.get('player_id', ''),
+                'x': message.get('x', 0),
+                'y': message.get('y', 0),
+                'direction_x': message.get('direction_x', 0),
+                'direction_y': message.get('direction_y', 0),
+                'damage': message.get('damage', 0),
+                'timestamp': message.get('timestamp', time.time())
+            }
+            if not hasattr(self, 'nadir_attacks'):
+                self.nadir_attacks = []
+            self.nadir_attacks.append(attack_data)
+            print(f"收到nadir攻击信号: 玩家{attack_data['player_id']}")
 
 class GameObjectPool:
     """服务端统一游戏对象池，管理所有玩家和敌怪"""
@@ -602,7 +959,7 @@ class GameObjectPool:
             'attack_power': enemy_data.get('attack_power', 10),
             'speed': enemy_data.get('speed', 1.2),  # 降低默认移动速度，从2改为1.2
             'patrol_range': enemy_data.get('patrol_range', 200),
-            'aggro_range': enemy_data.get('aggro_range', 150),
+            'aggro_range': enemy_data.get('aggro_range', 1000),
             'state': 'patrol',  # patrol, chase, attack, idle
             'target_player_id': None,
             'patrol_start_x': enemy_data.get('x', 0),
@@ -620,6 +977,9 @@ class GameObjectPool:
             self.enemies[enemy_id]['jump_interval'] = 2.0
             self.enemies[enemy_id]['jump_strength'] = 35
         elif enemy_data.get('type') == 'spider':
+            self.enemies[enemy_id]['jump_timer'] = 0
+            self.enemies[enemy_id]['jump_interval'] = 3.0
+            self.enemies[enemy_id]['jump_strength'] = 25  # 蜘蛛跳跃高度为史莱姆的一半
             if enemy_data.get('variant') in ['ground_static', 'ground_crawling']:
                 self.enemies[enemy_id]['vel_x'] = enemy_data.get('speed', 2) * self.enemies[enemy_id]['patrol_direction']
         elif enemy_data.get('type') == 'vulture':
@@ -685,7 +1045,7 @@ class GameObjectPool:
                         'attack_power': enemy_data.get('attack_power', 10),
                         'speed': enemy_data.get('speed', 2),
                         'patrol_range': enemy_data.get('patrol_range', 200),
-                        'aggro_range': enemy_data.get('aggro_range', 150)
+                        'aggro_range': enemy_data.get('aggro_range', 1000)
                     }
                     
                     # 为秃鹫添加飞行高度参数
@@ -735,6 +1095,7 @@ class GameObjectPool:
         for enemy_id, enemy in self.enemies.items():
             self._update_enemy_ai(enemy, dt)
             self._update_enemy_physics(enemy, dt)
+            self._update_enemy_animation(enemy, dt)
             
     def _update_enemy_ai(self, enemy, dt):
         """更新敌怪AI逻辑"""
@@ -755,7 +1116,7 @@ class GameObjectPool:
         if min_distance <= enemy['aggro_range']:
             enemy['state'] = 'chase'
             enemy['target_player_id'] = target_player.get('player_id')
-        elif min_distance > enemy['aggro_range'] * 1.5:  # 脱离仇恨范围
+        elif min_distance > enemy['aggro_range'] * 2.5:  # 脱离仇恨范围
             enemy['state'] = 'patrol'
             enemy['target_player_id'] = None
         
@@ -803,28 +1164,53 @@ class GameObjectPool:
             
     def _update_spider_movement(self, enemy, dt, target_player):
         """更新蜘蛛移动逻辑"""
+        # 更新跳跃计时器
+        enemy['jump_timer'] += dt
+        
         if enemy['variant'] in ['ground_static', 'ground_crawling']:
             # 地面蜘蛛
             if enemy['state'] == 'patrol':
-                # 巡逻状态：左右移动
+                # 如果patrol_range为0或variant为ground_static，保持静止
+                if enemy['patrol_range'] == 0 or enemy['variant'] == 'ground_static':
+                    enemy['vel_x'] = 0
+                    enemy['current_animation'] = 'idle'
+                    return
+                    
+                # 巡逻状态：跳跃移动
                 patrol_distance = abs(enemy['x'] - enemy['patrol_start_x'])
                 
                 # 如果超出巡逻范围，改变方向
                 if patrol_distance >= enemy['patrol_range']:
                     enemy['patrol_direction'] *= -1
                 
-                enemy['vel_x'] = enemy['speed'] * enemy['patrol_direction']
-                enemy['facing_right'] = enemy['patrol_direction'] > 0
-                enemy['current_animation'] = 'move'
+                # 定期跳跃（地面爬行蜘蛛）
+                if enemy['variant'] == 'ground_crawling' and enemy['jump_timer'] >= enemy['jump_interval'] and enemy['on_ground']:
+                    enemy['vel_y'] = -enemy['jump_strength']
+                    enemy['vel_x'] = enemy['speed'] * 0.6 * enemy['patrol_direction']
+                    enemy['jump_timer'] = 0
+                    enemy['facing_right'] = enemy['patrol_direction'] > 0
+                    enemy['current_animation'] = 'jump'
+                else:
+                    enemy['vel_x'] = enemy['speed'] * enemy['patrol_direction']
+                    enemy['facing_right'] = enemy['patrol_direction'] > 0
+                    enemy['current_animation'] = 'move'
                 
             elif enemy['state'] == 'chase' and target_player:
-                # 追击状态：向玩家方向移动
+                # 追击状态：向玩家方向跳跃移动
                 direction_x = target_player['x'] - enemy['x']
                 
                 if abs(direction_x) > 10:  # 避免抖动
-                    enemy['vel_x'] = enemy['speed'] * 1.2 * (1 if direction_x > 0 else -1)  # 降低追击速度倍数，从1.5改为1.2
-                    enemy['facing_right'] = direction_x > 0
-                    enemy['current_animation'] = 'move'
+                    # 地面爬行蜘蛛在追击时也会跳跃
+                    if enemy['variant'] == 'ground_crawling' and enemy['jump_timer'] >= enemy['jump_interval'] * 0.7 and enemy['on_ground']:
+                        enemy['vel_y'] = -enemy['jump_strength']
+                        enemy['vel_x'] = enemy['speed'] * 0.8 * (1 if direction_x > 0 else -1)
+                        enemy['jump_timer'] = 0
+                        enemy['facing_right'] = direction_x > 0
+                        enemy['current_animation'] = 'jump'
+                    else:
+                        enemy['vel_x'] = enemy['speed'] * 1.2 * (1 if direction_x > 0 else -1)  # 降低追击速度倍数，从1.5改为1.2
+                        enemy['facing_right'] = direction_x > 0
+                        enemy['current_animation'] = 'move'
                 else:
                     enemy['vel_x'] = 0
                     enemy['current_animation'] = 'idle'
@@ -839,6 +1225,13 @@ class GameObjectPool:
                 enemy['vel_y'] = math.sin(angle) * enemy['speed'] * 0.5
                 enemy['facing_right'] = enemy['vel_x'] > 0
                 
+                # 计算旋转角度（根据移动方向，减少90度）
+                if abs(enemy['vel_x']) > 0.1 or abs(enemy['vel_y']) > 0.1:
+                    enemy['rotation'] = math.degrees(math.atan2(enemy['vel_y'], enemy['vel_x']))
+                else:
+                    # 秃鹫不需要旋转
+                    pass
+                
             elif enemy['state'] == 'chase' and target_player:
                 # 直接向玩家移动
                 direction_x = target_player['x'] - enemy['x']
@@ -849,14 +1242,27 @@ class GameObjectPool:
                     enemy['vel_x'] = (direction_x / distance) * enemy['speed'] * 1.2  # 降低追击速度倍数，从1.5改为1.2
                     enemy['vel_y'] = (direction_y / distance) * enemy['speed'] * 1.2  # 降低追击速度倍数，从1.5改为1.2
                     enemy['facing_right'] = direction_x > 0
+                    
+                    # 计算旋转角度（根据移动方向，减少90度）
+                    enemy['rotation'] = math.degrees(math.atan2(direction_y, direction_x)) + 90
                 else:
+                    enemy['rotation'] = 0
                     enemy['vel_x'] = 0
                     enemy['vel_y'] = 0
                 
+
+
     def _update_vulture_movement(self, enemy, dt, target_player):
         """更新秃鹫移动逻辑"""
         if enemy['state'] == 'patrol':
             # 巡逻状态：在指定高度范围内飞行
+            # 如果patrol_range为0，保持静止
+            if enemy['patrol_range'] == 0:
+                enemy['vel_x'] = 0
+                enemy['vel_y'] = 0
+                enemy['current_animation'] = 'idle'
+                return
+                
             patrol_distance = abs(enemy['x'] - enemy['patrol_start_x'])
             
             # 如果超出巡逻范围，改变方向
@@ -893,16 +1299,14 @@ class GameObjectPool:
                 enemy['vel_y'] = (direction_y / distance) * enemy['speed'] * 1.5
                 enemy['facing_right'] = direction_x > 0
                 
-                # 计算旋转角度（斜向飞行）
-                angle = math.atan2(direction_y, direction_x)
-                enemy['rotation'] = math.degrees(angle)
+                # 秃鹫不需要旋转
                 
                 enemy['current_animation'] = 'move'
             else:
                 # 接近目标时悬停
-                enemy['vel_x'] *= 0.5
-                enemy['vel_y'] *= 0.5
-                enemy['rotation'] = 0
+                enemy['vel_x'] = 0
+                enemy['vel_y'] = 0
+                # 秃鹫不需要旋转
                 enemy['current_animation'] = 'idle'
             
     def _update_enemy_physics(self, enemy, dt):
@@ -915,27 +1319,35 @@ class GameObjectPool:
         enemy['x'] += enemy['vel_x'] * dt * 60
         enemy['y'] += enemy['vel_y'] * dt * 60
         
-        # 简单的平台碰撞检测（基于地图数据）
-        if enemy['type'] != 'vulture':  # 飞行敌人不需要地面碰撞
+        # 平台碰撞检测
+        if enemy['type'] == 'vulture':
+            # 秃鹫需要边界检测，但不需要平台碰撞
+            self._check_vulture_boundaries(enemy)
+        elif enemy['type'] == 'spider' and enemy.get('variant') == 'wall_crawling':
+            # 墙爬蜘蛛需要特殊的碰撞处理
+            self._check_wall_spider_collision(enemy)
+        else:
+            # 其他敌人使用标准平台碰撞检测
             self._check_enemy_platform_collision(enemy)
         
-        # 边界检测
-        if enemy['x'] < 0:
-            enemy['x'] = 0
-            enemy['vel_x'] = 0
-            if enemy['type'] == 'slime':
-                enemy['patrol_direction'] *= -1
-        elif enemy['x'] > 2000:  # 假设地图宽度
-            enemy['x'] = 2000
-            enemy['vel_x'] = 0
-            if enemy['type'] == 'slime':
-                enemy['patrol_direction'] *= -1
-        
-        # 防止敌人掉出地图
-        if enemy['y'] > 1000:  # 假设地图高度
-            enemy['y'] = 1000
-            enemy['vel_y'] = 0
-            enemy['on_ground'] = True
+        # 标准边界检测（适用于地面敌人）
+        if enemy['type'] != 'vulture':
+            if enemy['x'] < 0:
+                enemy['x'] = 0
+                enemy['vel_x'] = 0
+                if enemy['type'] == 'slime':
+                    enemy['patrol_direction'] *= -1
+            elif enemy['x'] > 1952:  # 地图宽度 - 敌人宽度
+                enemy['x'] = 1952
+                enemy['vel_x'] = 0
+                if enemy['type'] == 'slime':
+                    enemy['patrol_direction'] *= -1
+            
+            # 防止敌人掉出地图
+            if enemy['y'] > 952:  # 地图高度 - 敌人高度
+                enemy['y'] = 952
+                enemy['vel_y'] = 0
+                enemy['on_ground'] = True
     
     def _check_enemy_platform_collision(self, enemy):
         """检查敌人与平台的碰撞"""
@@ -995,6 +1407,71 @@ class GameObjectPool:
                     if enemy['type'] == 'slime':
                         enemy['patrol_direction'] *= -1
                     break
+    
+    def _check_vulture_boundaries(self, enemy):
+        """检查秃鹫的边界，防止飞出地图"""
+        # 水平边界检测
+        if enemy['x'] < 0:
+            enemy['x'] = 0
+            enemy['vel_x'] = abs(enemy['vel_x'])  # 反弹
+            enemy['patrol_direction'] = 1  # 向右
+        elif enemy['x'] > 1952:  # 地图宽度 - 敌人宽度
+            enemy['x'] = 1952
+            enemy['vel_x'] = -abs(enemy['vel_x'])  # 反弹
+            enemy['patrol_direction'] = -1  # 向左
+        
+        # 垂直边界检测
+        if enemy['y'] < 0:
+            enemy['y'] = 0
+            enemy['vel_y'] = abs(enemy['vel_y'])  # 反弹
+        elif enemy['y'] > 952:  # 地图高度 - 敌人高度
+            enemy['y'] = 952
+            enemy['vel_y'] = -abs(enemy['vel_y'])  # 反弹
+    
+    def _check_wall_spider_collision(self, enemy):
+        """检查墙爬蜘蛛的碰撞，允许在墙面移动但有边界限制"""
+        # 基本边界检测
+        if enemy['x'] < 0:
+            enemy['x'] = 0
+            enemy['vel_x'] = abs(enemy['vel_x'])  # 反弹
+        elif enemy['x'] > 1952:
+            enemy['x'] = 1952
+            enemy['vel_x'] = -abs(enemy['vel_x'])  # 反弹
+        
+        if enemy['y'] < 0:
+            enemy['y'] = 0
+            enemy['vel_y'] = abs(enemy['vel_y'])  # 反弹
+        elif enemy['y'] > 952:
+            enemy['y'] = 952
+            enemy['vel_y'] = -abs(enemy['vel_y'])  # 反弹
+            
+    def _update_enemy_animation(self, enemy, dt):
+        """更新敌人动画帧"""
+        # 动画帧更新间隔（秒）
+        animation_interval = 0.1  # 每0.1秒更新一帧
+        
+        # 初始化动画计时器
+        if 'animation_timer' not in enemy:
+            enemy['animation_timer'] = 0
+            
+        enemy['animation_timer'] += dt
+        
+        # 当计时器超过间隔时更新帧
+        if enemy['animation_timer'] >= animation_interval:
+            enemy['animation_timer'] = 0
+            
+            # 根据当前动画状态更新帧索引
+            current_anim = enemy.get('current_animation', 'idle')
+            
+            # 简化的帧数设定（实际应该从客户端获取或配置）
+            frame_counts = {
+                'idle': 4,
+                'move': 4, 
+                'jump': 4
+            }
+            
+            max_frames = frame_counts.get(current_anim, 4)
+            enemy['frame_index'] = (enemy.get('frame_index', 0) + 1) % max_frames
             
     def get_all_enemies_data(self):
         """获取所有敌怪的同步数据"""
@@ -1020,7 +1497,7 @@ class GameObjectPool:
             }
             
             # 添加特殊属性
-            if enemy['type'] == 'vulture' and 'rotation' in enemy:
+            if enemy['type'] == 'spider' and enemy.get('variant') == 'wall_crawling' and 'rotation' in enemy:
                 enemy_sync_data['rotation'] = enemy['rotation']
             
             enemies_data.append(enemy_sync_data)
@@ -1045,6 +1522,11 @@ class GameObjectPool:
         return players_data
 
 class NetworkServer:
+    # 数据包大小优化常量
+    MAX_PACKET_SIZE = 1400  # 最大数据包大小（字节）
+    COMPRESSION_THRESHOLD = 500  # 压缩阈值（字节）
+    CHUNK_SIZE = 1200  # 分块大小（字节）
+    
     def __init__(self, host='localhost', port=12345):
         self.host = host
         self.port = port
@@ -1063,6 +1545,8 @@ class NetworkServer:
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # 禁用Nagle算法，减少延迟
+            self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.socket.bind((self.host, self.port))
             self.socket.listen(5)
             self.running = True
@@ -1077,6 +1561,8 @@ class NetworkServer:
             while self.running:
                 try:
                     client_socket, address = self.socket.accept()
+                    # 为客户端连接禁用Nagle算法，减少延迟
+                    client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     
                     # 检查是否是重复连接（同一个IP和端口）
                     if address in self.connected_addresses:
@@ -1148,6 +1634,33 @@ class NetworkServer:
         
         except Exception as e:
             print(f"服务器启动失败: {e}")
+    
+    def _decompress_data(self, compressed_data):
+        """解压缩数据"""
+        try:
+            decoded_data = base64.b64decode(compressed_data)
+            decompressed_data = zlib.decompress(decoded_data)
+            return json.loads(decompressed_data.decode('utf-8'))
+        except Exception as e:
+            print(f"数据解压缩失败: {e}")
+            return None
+    
+    def _process_chunked_message(self, player_id, chunks):
+        """处理分块消息"""
+        try:
+            # 重组分块数据
+            combined_data = ''.join(chunk['data'] for chunk in sorted(chunks, key=lambda x: x['chunk_index']))
+            
+            # 检查是否压缩
+            if chunks[0].get('compressed', False):
+                message = self._decompress_data(combined_data)
+            else:
+                message = json.loads(combined_data)
+            
+            if message:
+                self._process_message(player_id, message)
+        except Exception as e:
+            print(f"处理分块消息失败: {e}")
     
     def send_room_disbanded_message(self):
         """主动发送房间解散消息给所有客户端"""
@@ -1247,6 +1760,7 @@ class NetworkServer:
     
     def _handle_client(self, player_id, client_socket):
         buffer = ""
+        chunk_buffer = {}  # 存储分块消息
         
         try:
             while self.running:
@@ -1258,8 +1772,35 @@ class NetworkServer:
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
                     if line.strip():
-                        message = json.loads(line)
-                        self._process_message(player_id, message)
+                        try:
+                            message = json.loads(line)
+                            
+                            # 检查是否为分块消息
+                            if message.get('type') == 'chunk':
+                                chunk_id = message.get('chunk_id')
+                                if chunk_id not in chunk_buffer:
+                                    chunk_buffer[chunk_id] = []
+                                chunk_buffer[chunk_id].append(message)
+                                
+                                # 检查是否收到所有分块
+                                if len(chunk_buffer[chunk_id]) == message.get('total_chunks'):
+                                    self._process_chunked_message(player_id, chunk_buffer[chunk_id])
+                                    del chunk_buffer[chunk_id]
+                            
+                            # 检查是否为压缩消息
+                            elif message.get('compressed', False):
+                                decompressed_message = self._decompress_data(message['data'])
+                                if decompressed_message:
+                                    self._process_message(player_id, decompressed_message)
+                            
+                            # 普通消息
+                            else:
+                                self._process_message(player_id, message)
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"JSON解析失败: {e}")
+                        except Exception as e:
+                            print(f"处理消息失败: {e}")
         
         except Exception as e:
             print(f"处理客户端 {player_id} 失败: {e}")
@@ -1284,9 +1825,20 @@ class NetworkServer:
                 self.clients[player_id]['last_update'] = time.time()
             
             # 更新服务端游戏对象池中的玩家数据
+            # 处理相对坐标转换为绝对坐标
+            if 'rel_x' in message and 'rel_y' in message:
+                # 客户端发送的是相对坐标，需要转换为绝对坐标
+                # 假设标准分辨率为1920x1080
+                x = message['rel_x'] * 1920
+                y = message['rel_y'] * 1080
+            else:
+                # 兼容直接发送绝对坐标的情况
+                x = message.get('x', 0)
+                y = message.get('y', 0)
+            
             player_data = {
-                'x': message.get('x', 0),
-                'y': message.get('y', 0),
+                'x': x,
+                'y': y,
                 'vel_x': message.get('vel_x', 0),
                 'vel_y': message.get('vel_y', 0),
                 'facing_right': message.get('facing_right', True),
@@ -1341,6 +1893,16 @@ class NetworkServer:
             self._broadcast_to_others(player_id, forward_msg)
         
         elif message['type'] == 'portal_trigger':
+            # 处理传送门触发：重新加载地图并生成敌人
+            target_map = message.get('target_map', '')
+            if target_map:
+                try:
+                    # 加载新地图数据
+                    self.load_map_data(target_map)
+                    print(f"服务器: 玩家 {player_id} 触发传送门到 {target_map}，重新生成敌人")
+                except Exception as e:
+                    print(f"服务器: 加载地图 {target_map} 失败: {e}")
+            
             # 广播传送门触发消息给所有玩家
             forward_msg = message.copy()
             forward_msg['player_id'] = player_id
@@ -1349,6 +1911,16 @@ class NetworkServer:
             print(f"服务器: 玩家 {player_id} 触发传送门到 {message.get('target_map', '未知地图')}，通知所有玩家")
         
         elif message['type'] == 'map_change':
+            # 处理地图切换：重新加载地图并生成敌人
+            target_map = message.get('target_map', '')
+            if target_map:
+                try:
+                    # 加载新地图数据
+                    self.load_map_data(target_map)
+                    print(f"服务器: 房主 {player_id} 切换地图到 {target_map}，重新生成敌人")
+                except Exception as e:
+                    print(f"服务器: 加载地图 {target_map} 失败: {e}")
+            
             # 广播地图切换消息给其他玩家
             forward_msg = message.copy()
             forward_msg['player_id'] = player_id
@@ -1411,7 +1983,7 @@ class NetworkServer:
             for enemy_data in enemies_data:
                 enemy_id = enemy_data.get('enemy_id', '')
                 if enemy_id in self.game_pool.enemies:
-                    self.game_pool.enemies[enemy_id].update({
+                    update_data = {
                         'x': enemy_data.get('x', self.game_pool.enemies[enemy_id]['x']),
                         'y': enemy_data.get('y', self.game_pool.enemies[enemy_id]['y']),
                         'vel_x': enemy_data.get('vel_x', self.game_pool.enemies[enemy_id]['vel_x']),
@@ -1420,7 +1992,13 @@ class NetworkServer:
                         'state': enemy_data.get('state', self.game_pool.enemies[enemy_id]['state']),
                         'health': enemy_data.get('health', self.game_pool.enemies[enemy_id]['health']),
                         'last_update': time.time()
-                    })
+                    }
+                    
+                    # 添加旋转角度（如果存在）
+                    if 'rotation' in enemy_data:
+                        update_data['rotation'] = enemy_data['rotation']
+                    
+                    self.game_pool.enemies[enemy_id].update(update_data)
             
             self._broadcast_to_others(player_id, forward_msg)
         
@@ -1439,7 +2017,15 @@ class NetworkServer:
             # 更新服务端游戏对象池中的敌人血量
             if enemy_id in self.game_pool.enemies:
                 self.game_pool.enemies[enemy_id]['health'] = current_health
-                print(f"服务器: 敌人 {enemy_id} 受到 {damage} 点伤害，剩余血量: {current_health}")
+                
+                # 广播敌人血量更新给所有客户端
+                health_update_msg = {
+                    'type': 'enemy_update',
+                    'enemy_id': enemy_id,
+                    'current_health': current_health,
+                    'timestamp': time.time()
+                }
+                self._broadcast_to_all(health_update_msg)
                 
                 # 检查敌人是否死亡
                 if current_health <= 0:
@@ -1458,8 +2044,43 @@ class NetworkServer:
                     print(f"服务器: 敌人 {enemy_id} 已死亡，从游戏对象池中移除")
             else:
                 print(f"服务器: 敌人 {enemy_id} 不存在，无法应用伤害")
+        
+        elif message['type'] == 'projectile_create':
+            # 处理弹幕创建消息
+            forward_msg = message.copy()
+            forward_msg['player_id'] = player_id
             
-        elif message['type'] == 'map_data':
+            # 广播给其他玩家
+            self._broadcast_to_others(player_id, forward_msg)
+            print(f"服务器: 玩家 {player_id} 创建了弹幕 {message.get('uuid', '未知ID')}")
+        
+        elif message['type'] == 'projectile_update':
+            # 处理弹幕更新消息
+            forward_msg = message.copy()
+            forward_msg['player_id'] = player_id
+            
+            # 广播给其他玩家
+            self._broadcast_to_others(player_id, forward_msg)
+        
+        elif message['type'] == 'projectile_destroy':
+            # 处理弹幕销毁消息
+            forward_msg = message.copy()
+            forward_msg['player_id'] = player_id
+            
+            # 广播给其他玩家
+            self._broadcast_to_others(player_id, forward_msg)
+            print(f"服务器: 玩家 {player_id} 销毁了弹幕 {message.get('uuid', '未知ID')}")
+        
+        elif message['type'] == 'nadir_attack':
+            # 处理nadir武器攻击消息
+            forward_msg = message.copy()
+            forward_msg['player_id'] = player_id
+            
+            # 广播给其他玩家
+            self._broadcast_to_others(player_id, forward_msg)
+            print(f"服务器: 玩家 {player_id} 执行了nadir攻击，位置({message.get('x', 0)}, {message.get('y', 0)})")
+            
+        if message['type'] == 'map_data':
             # 处理地图数据设置请求
             map_data = message.get('map_data', {})
             self.game_pool.set_map_data(map_data)
@@ -1504,6 +2125,54 @@ class NetworkServer:
         
         if message.get('type') == 'room_disbanded':
             print(f"房间解散消息发送完成，成功发送给 {successful_sends} 个客户端")
+    
+    def load_map_data(self, target_map):
+        """加载地图数据并重新生成敌人"""
+        try:
+            # 构建地图文件路径
+            if isinstance(target_map, int):
+                map_file = get_resource_path(f"map/series1/map{target_map}.json")
+            else:
+                # 如果是字符串，可能是文件名或路径
+                if target_map.startswith('series'):
+                    # 如果已经包含series路径，直接在map/前缀下使用
+                    if target_map.endswith('.json'):
+                        map_file = get_resource_path(f"map/{target_map}")
+                    else:
+                        map_file = get_resource_path(f"map/{target_map}.json")
+                else:
+                    # 如果不包含series路径，添加series1前缀
+                    if target_map.endswith('.json'):
+                        map_file = get_resource_path(f"map/series1/{target_map}")
+                    else:
+                        map_file = get_resource_path(f"map/series1/{target_map}.json")
+            
+            # 加载地图数据
+            import json
+            import os
+            if os.path.exists(map_file):
+                with open(map_file, 'r', encoding='utf-8') as f:
+                    map_data = json.load(f)
+                
+                # 使用GameObjectPool的set_map_data方法
+                self.game_pool.set_map_data(map_data)
+                
+                # 广播地图数据给所有客户端
+                map_ready_msg = {
+                    'type': 'map_ready',
+                    'map_data': map_data
+                }
+                self._broadcast_to_all(map_ready_msg)
+                
+                print(f"服务器成功加载地图: {map_file}")
+                return True
+            else:
+                print(f"地图文件不存在: {map_file}")
+                return False
+                
+        except Exception as e:
+            print(f"加载地图数据失败: {e}")
+            return False
     
     def _disconnect_client(self, player_id):
         if player_id in self.clients:

@@ -5,7 +5,7 @@
   "type": "坦克型",
   "color": [139, 69, 19],
   "stats": {
-    "attack_power": 4,
+    "attack_power": 999,
     "speed_multiplier": 0.7,
     "defense": 5,
     "jump_multiplier": 0.8,

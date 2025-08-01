@@ -1,0 +1,83 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(
+    ['main.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[
+        ('character', 'character'),
+        ('character_loader.py', '.'),
+        ('network.py', '.'),
+        ('maingame', 'maingame'),
+        ('enemy', 'enemy'),
+        ('font', 'font'),
+        ('gif', 'gif'),
+        ('img', 'img'),
+        ('map', 'map'),
+        ('music', 'music'),
+        ('weapon', 'weapon'),
+        ('requirements.txt', '.'),
+    ],
+    hiddenimports=[
+        'pygame',
+        'pygame.mixer',
+        'pygame.font',
+        'pygame.image',
+        'pygame.transform',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageTk',
+        'socket',
+        'threading',
+        'json',
+        'uuid',
+        'math',
+        'time',
+        'os',
+        'sys',
+        'random',
+        'copy',
+        'collections',
+        'character_loader',
+        'network',
+        'maingame',
+        'maingame.game',
+        'maingame.player',
+        'maingame.enemy',
+        'maingame.platform',
+        'maingame.weapon',
+        'maingame.portal',
+        'maingame.Projectile'
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='Hajimi',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    icon='backanimation.jpg'
+)

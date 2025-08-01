@@ -52,14 +52,6 @@ pip3 install -r requirements.txt
 - **暂停**: ESC 键
 - **返回主菜单**: 暂停状态下按 Q 键
 
-## 单机模式
-
-直接运行游戏：
-
-```bash
-python3 main.py
-```
-
 ## 联机模式
 
 ### 线上联机
