@@ -5,11 +5,11 @@
   "type": "平衡型",
   "color": [65, 105, 225],
   "stats": {
-    "attack_power": 999,
+    "attack_power": 99,
     "speed_multiplier": 1.0,
     "defense": 3,
     "jump_multiplier": 1.0,
-    "max_health": 100,
+    "max_health": 10000000,
     "star_ratings": {
       "attack": 3,
       "speed": 3,

@@ -18,6 +18,7 @@ a = Analysis(
         ('map', 'map'),
         ('music', 'music'),
         ('weapon', 'weapon'),
+        ('boss', 'boss'),
         ('requirements.txt', '.'),
     ],
     hiddenimports=[
@@ -49,7 +50,8 @@ a = Analysis(
         'maingame.platform',
         'maingame.weapon',
         'maingame.portal',
-        'maingame.Projectile'
+        'maingame.Projectile',
+        'maingame.boss'
     ],
     hookspath=[],
     hooksconfig={},

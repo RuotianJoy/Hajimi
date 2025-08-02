@@ -11,6 +11,7 @@ from character_loader import CharacterLoader
 from maingame import WIDTH, HEIGHT, FPS, WHITE, BLACK, BLUE, GREEN, MAIN_MENU, MODE_SELECT, CHARACTER_SELECT, PLAYING, \
     PAUSED, GAME_OVER, SETTINGS, KEY_BINDING, CREATE_ROOM, JOIN_ROOM, WAITING_ROOM, ONLINE, HOST_ROOM, \
     JOIN_ROOM_MODE
+from maingame.boss import Boss
 from maingame.enemy import Enemy
 from maingame.platform import Platform
 from maingame.player import Player
@@ -56,6 +57,7 @@ class Game:
         self.platforms = None
         self.portals = []
         self.enemies = []  # 敌怪列表
+        self.bosses = []  # Boss列表
 
         # 网络相关
         self.network_client = None
@@ -164,7 +166,8 @@ class Game:
         self.current_music = None  # 当前播放的音乐文件
         self.music_files = {
             'menu': get_resource_path('music/hudmusic.mp3'),
-            'game': get_resource_path('music/BackgroundMusic.mp3')
+            'game': get_resource_path('music/BackgroundMusic.mp3'),
+            'boss': get_resource_path('music/bossmusic.mp3')
         }
 
         # 初始化音乐系统
@@ -1066,8 +1069,11 @@ class Game:
         self.projectiles = []  # 弹幕列表
         self.max_projectiles = 30  # 限制弹幕数量以提高性能
 
-        # 切换到游戏音乐
-        self.play_music('game')
+        # 根据地图选择音乐
+        if self.current_map_name == '终点站':
+            self.play_music('boss')
+        else:
+            self.play_music('game')
 
         self.set_state(PLAYING, "游戏初始化完成")
 
@@ -1259,6 +1265,33 @@ class Game:
                                         self.network_client.send_player_damage(player.player_id, damage)
                             break  # 每个敌人每次只能攻击一个玩家
 
+            # 检查Boss攻击所有玩家
+            for boss in self.bosses[:]:
+                # 检查Boss与所有玩家的碰撞
+                for player in all_players:
+                    if boss.can_attack():
+                        damage = boss.attack(player)
+                        if damage > 0:
+                            # 如果是当前玩家受到攻击
+                            if player == self.player:
+                                self.player.take_damage(damage)
+                                print(f"玩家受到Boss攻击，造成 {damage} 点伤害")
+
+                                # 检查玩家是否死亡
+                                if self.player.current_health <= 0:
+                                    print("玩家血量为0，游戏结束")
+                                    if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                                        player_name = self.player_name if self.player_name else "未命名玩家"
+                                        self.network_client.send_player_death(player_name)
+                                    self.show_game_over()
+                                    return
+                        else:
+                            # 其他玩家受到攻击，通过网络发送伤害信息
+                            if (self.game_mode == ONLINE and self.network_client and
+                                self.network_client.connected and hasattr(player, 'player_id')):
+                                self.network_client.send_player_damage(player.player_id, damage)
+                        break  # 每个Boss每次只能攻击一个玩家
+
             # 处理敌人死亡
             dead_enemies = [enemy for enemy in self.enemies if enemy.current_health <= 0]
             for dead_enemy in dead_enemies:
@@ -1277,6 +1310,34 @@ class Game:
                 # 清空已处理的死亡敌人列表
                 self.network_client.dead_enemies.clear()
 
+            # 处理Boss死亡
+            dead_bosses = [boss for boss in self.bosses if boss.current_health <= 0]
+            for dead_boss in dead_bosses:
+                print(f"Boss {dead_boss.boss_id} 已死亡，从对象池中移除")
+                # 在多人模式下发送Boss死亡信息
+                if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                    self.network_client.send_boss_death(dead_boss.boss_id)
+
+            # 移除死亡的Boss
+            self.bosses = [boss for boss in self.bosses if boss.current_health > 0]
+            
+            # 处理网络同步的死亡Boss
+            if (self.game_mode == ONLINE and self.network_client and
+                hasattr(self.network_client, 'dead_bosses') and self.network_client.dead_bosses):
+                # 移除网络同步的死亡Boss
+                self.bosses = [boss for boss in self.bosses if boss.boss_id not in self.network_client.dead_bosses]
+                # 清空已处理的死亡Boss列表
+                self.network_client.dead_bosses.clear()
+            
+            # 检查是否需要返回等待房间
+            if (self.game_mode == ONLINE and self.network_client and
+                hasattr(self.network_client, 'should_return_to_waiting') and 
+                self.network_client.should_return_to_waiting):
+                print("Boss已被击败，返回等待房间")
+                self.network_client.should_return_to_waiting = False
+                self.current_state = WAITING_ROOM
+                return
+
             # 更新弹幕
             if hasattr(self, 'projectiles'):
                 for projectile in self.projectiles[:]:
@@ -1294,6 +1355,22 @@ class Game:
                             # 在网络模式下发送敌人受伤信息给服务端
                             if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
                                 self.network_client.send_enemy_damage(enemy.enemy_id, projectile.damage, enemy.current_health)
+
+                            # 移除弹幕
+                            if projectile in self.projectiles:
+                                self.projectiles.remove(projectile)
+                            break
+
+                    # 检查弹幕与Boss的碰撞
+                    for boss in self.bosses[:]:
+                        if projectile.rect.colliderect(boss.rect):
+                            # 弹幕击中Boss
+                            boss.take_damage(projectile.damage)
+                            print(f"弹幕击中Boss，造成 {projectile.damage} 点伤害，Boss剩余血量: {boss.current_health}/{boss.max_health}")
+
+                            # 在网络模式下发送Boss受伤信息给服务端
+                            if self.game_mode == ONLINE and self.network_client and self.network_client.connected:
+                                self.network_client.send_boss_damage(boss.boss_id, projectile.damage, boss.current_health)
 
                             # 移除弹幕
                             if projectile in self.projectiles:
@@ -1517,6 +1594,80 @@ class Game:
 
                 # 清空已处理的敌人更新
                 self.network_client.enemy_updates.clear()
+
+            # 处理服务端同步的Boss数据
+            if (self.game_mode == ONLINE and self.network_client and
+                hasattr(self.network_client, 'bosses_sync_data') and self.network_client.bosses_sync_data):
+                # 应用服务端同步的Boss数据
+                for boss_data in self.network_client.bosses_sync_data:
+                    boss_id = boss_data.get('boss_id')
+
+                    # 查找对应的Boss
+                    boss_found = False
+                    for boss in self.bosses:
+                        if boss.boss_id == boss_id:
+                            boss_found = True
+                            # 应用服务端的所有状态更新（除了血量，血量由伤害事件单独处理）
+                            # if 'health' in boss_data:
+                            #     boss.current_health = min(boss_data['health'], boss.max_health)
+                            if 'x' in boss_data and 'y' in boss_data:
+                                boss.x = boss_data['x']
+                                boss.y = boss_data['y']
+                                boss.rect.x = int(boss.x)
+                                boss.rect.y = int(boss.y)
+                            if 'vel_x' in boss_data:
+                                boss.vel_x = boss_data['vel_x']
+                            if 'vel_y' in boss_data:
+                                boss.vel_y = boss_data['vel_y']
+                            if 'facing_right' in boss_data:
+                                boss.facing_right = boss_data['facing_right']
+                            if 'state' in boss_data:
+                                boss.state = boss_data['state']
+                            if 'current_animation' in boss_data:
+                                boss.current_animation = boss_data['current_animation']
+                            if 'frame_index' in boss_data:
+                                boss.frame_index = boss_data['frame_index']
+                            if 'projectiles' in boss_data:
+                                boss.projectiles = boss_data['projectiles']
+                            break
+
+                    # 如果Boss不存在且不在死亡列表中，从服务端数据创建新Boss
+                    is_boss_dead = (hasattr(self.network_client, 'dead_bosses') and 
+                                   boss_id in self.network_client.dead_bosses)
+                    if not boss_found and boss_id and not is_boss_dead:
+                        try:
+                            from maingame.boss import Boss
+                            # 创建Boss对象
+                            player_count = len(self.room_players) if hasattr(self, 'room_players') and self.room_players else 1
+                            new_boss = Boss(boss_data, player_count)
+                            new_boss.boss_id = boss_id
+                            
+                            # 应用服务端状态（除了血量，血量由伤害事件单独处理）
+                            # if 'health' in boss_data:
+                            #     new_boss.current_health = boss_data['health']
+                            if 'vel_x' in boss_data:
+                                new_boss.vel_x = boss_data['vel_x']
+                            if 'vel_y' in boss_data:
+                                new_boss.vel_y = boss_data['vel_y']
+                            if 'facing_right' in boss_data:
+                                new_boss.facing_right = boss_data['facing_right']
+                            if 'state' in boss_data:
+                                new_boss.state = boss_data['state']
+                            if 'current_animation' in boss_data:
+                                new_boss.current_animation = boss_data['current_animation']
+                            if 'frame_index' in boss_data:
+                                new_boss.frame_index = boss_data['frame_index']
+                            if 'projectiles' in boss_data:
+                                new_boss.projectiles = boss_data['projectiles']
+
+                            self.bosses.append(new_boss)
+                            print(f"客户端从服务端数据创建Boss ID: {boss_id}")
+
+                        except Exception as e:
+                            print(f"客户端创建Boss失败: {e}, 数据: {boss_data}")
+
+                # 清空已处理的Boss同步数据
+                self.network_client.bosses_sync_data.clear()
 
             # 更新传送门
             for portal in self.portals:
@@ -1747,6 +1898,13 @@ class Game:
             enemy_rect = pygame.Rect(enemy.x - 10, enemy.y - 10, enemy.width + 20, enemy.height + 20)
             self.add_dirty_rect(enemy_rect)
             enemy.draw(self.screen)
+
+        # 绘制Boss并记录脏矩形
+        for boss in self.bosses:
+            # 记录Boss当前位置作为脏矩形
+            boss_rect = pygame.Rect(boss.x - 20, boss.y - 20, boss.width + 40, boss.height + 40)
+            self.add_dirty_rect(boss_rect)
+            boss.draw(self.screen)
 
         # 绘制玩家并记录脏矩形
         player_rect = pygame.Rect(self.player.x - 10, self.player.y - 10, self.player.width + 20, self.player.height + 20)
@@ -4051,6 +4209,12 @@ class Game:
                 self.network_client.send_player_data(player_data)
 
             print(f"成功传送到地图: {map_data['name']}")
+            
+            # 根据地图切换音乐
+            if map_data['name'] == '终点站':
+                self.play_music('boss')
+            else:
+                self.play_music('game')
 
         except FileNotFoundError:
             print(f"错误: 找不到地图文件 {map_path}")

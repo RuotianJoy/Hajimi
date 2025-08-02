@@ -1,3 +1,5 @@
+
+
 {
   "name": "终点站",
   "description": "恭喜通关！这里是你的终点",
@@ -9,11 +11,94 @@
       "width": "WIDTH",
       "height": 75,
       "type": "ground"
+    },
+    {
+      "x": 300,
+      "y": "HEIGHT - 200",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 700,
+      "y": "HEIGHT - 300",
+      "width": 150,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1100,
+      "y": "HEIGHT - 200",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1500,
+      "y": "HEIGHT - 350",
+      "width": 180,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1500,
+      "y": "HEIGHT - 350",
+      "width": 180,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 800,
+      "y": "HEIGHT - 500",
+      "width": 250,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1300,
+      "y": "HEIGHT - 550",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 400,
+      "y": "HEIGHT - 600",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 1600,
+      "y": "HEIGHT - 650",
+      "width": 200,
+      "height": 48,
+      "type": "platform"
+    },
+    {
+      "x": 200,
+      "y": "HEIGHT - 800",
+      "width": 300,
+      "height": 48,
+      "type": "platform"
     }
   ],
   "portals": [],
   "spawn_point": {
     "x": 50,
     "y": "HEIGHT - 200"
-  }
+  },
+  "enemies": [
+    {
+      "type": "boss",
+      "variant": "milkdragon",
+      "id": "milkdragon_boss_final",
+      "x": 1000,
+      "y": "HEIGHT - 400",
+      "health": 2000,
+      "attack_power": 30,
+      "speed": 3,
+      "attack_cooldown": 2.0
+    }
+  ]
 }

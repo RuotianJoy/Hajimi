@@ -9,6 +9,7 @@ import sys
 import zlib
 import base64
 from typing import Dict, Any, Optional
+from maingame.boss import Boss
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径，兼容开发环境和PyInstaller打包环境"""
@@ -46,8 +47,10 @@ class NetworkClient:
         self.portal_triggered = False  # 传送门触发标志
         self.portal_target_map = ''  # 传送门目标地图
         self.dead_enemies = set()  # 死亡敌人ID集合
+        self.dead_bosses = set()  # 死亡Boss ID集合
         self.enemy_updates = {}  # 敌人状态更新字典
         self.enemies_sync_data = []  # 服务端同步的敌人数据
+        self.bosses_sync_data = []  # 服务端同步的Boss数据
         self.map_ready = False  # 服务端地图是否准备完成
         self.server_enemies_count = 0  # 服务端敌人数量
         self.projectiles_sync_data = []  # 服务端同步的弹幕数据
@@ -490,6 +493,46 @@ class NetworkClient:
             self.connected = False
             self.connected = False
     
+    def send_boss_damage(self, boss_id, damage, current_health):
+        """发送Boss受伤信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'boss_damage',
+            'boss_id': boss_id,
+            'damage': damage,
+            'current_health': current_health,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+            print(f"已发送Boss伤害信号: Boss{boss_id} 受到{damage}点伤害，剩余血量{current_health}")
+        except Exception as e:
+            print(f"发送Boss伤害信号失败: {e}")
+            self.connected = False
+    
+    def send_boss_death(self, boss_id):
+        """发送Boss死亡信息到服务器"""
+        if not self.connected:
+            return
+        
+        data = {
+            'type': 'boss_death',
+            'boss_id': boss_id,
+            'timestamp': time.time()
+        }
+        
+        try:
+            message = json.dumps(data) + '\n'
+            self.socket.send(message.encode('utf-8'))
+            print(f"已发送Boss死亡信号: Boss{boss_id} 已死亡")
+        except Exception as e:
+            print(f"发送Boss死亡信号失败: {e}")
+            self.connected = False
+    
     def send_projectile_create(self, projectile):
         """发送弹幕创建信息到服务器"""
         if not self.connected:
@@ -805,6 +848,24 @@ class NetworkClient:
                 self.dead_enemies = set()
             self.dead_enemies.add(enemy_id)
         
+        elif msg_type == 'boss_death':
+            # 接收Boss死亡信号，用于同步Boss状态
+            boss_id = message.get('boss_id', '')
+            print(f"Boss (ID: {boss_id}) 已被击败")
+            # 设置标志让游戏主循环处理Boss移除
+            if not hasattr(self, 'dead_bosses'):
+                self.dead_bosses = set()
+            self.dead_bosses.add(boss_id)
+        
+        elif msg_type == 'return_to_waiting_room':
+            # 接收返回等待房间的消息
+            reason = message.get('reason', '')
+            print(f"收到返回等待房间信号，原因: {reason}")
+            # 设置标志让游戏主循环处理返回等待房间
+            if not hasattr(self, 'should_return_to_waiting'):
+                self.should_return_to_waiting = False
+            self.should_return_to_waiting = True
+        
         elif msg_type == 'enemy_update':
             # 接收敌人状态更新
             enemy_id = message.get('enemy_id', '')
@@ -828,6 +889,13 @@ class NetworkClient:
             if not hasattr(self, 'enemies_sync_data'):
                 self.enemies_sync_data = []
             self.enemies_sync_data = enemies_data
+        
+        elif msg_type == 'bosses_sync':
+            # 接收服务端同步的Boss数据
+            bosses_data = message.get('bosses', [])
+            if not hasattr(self, 'bosses_sync_data'):
+                self.bosses_sync_data = []
+            self.bosses_sync_data = bosses_data
         
         elif msg_type == 'player_damage_received':
             # 接收玩家受伤信息
@@ -909,6 +977,8 @@ class GameObjectPool:
     def __init__(self):
         self.players = {}  # 玩家对象池 {player_id: player_data}
         self.enemies = {}  # 敌怪对象池 {enemy_id: enemy_data}
+        self.bosses = {}  # Boss对象池 {boss_id: boss_data}
+        self.dead_bosses = set()  # 死亡Boss集合
         self.platforms = []  # 平台数据
         self.current_map_data = None  # 当前地图信息
         self.last_update_time = time.time()
@@ -993,6 +1063,51 @@ class GameObjectPool:
         if enemy_id in self.enemies:
             del self.enemies[enemy_id]
             
+    def add_boss(self, boss_id, boss_data):
+        """添加Boss到对象池"""
+        player_count = len(self.players)
+        base_health = 2000
+        base_damage = 30
+        
+        # 根据玩家数量调整血量和伤害
+        health_multiplier = 1 + (player_count - 1) * 0.5
+        damage_multiplier = 1 + (player_count - 1) * 0.5
+        
+        self.bosses[boss_id] = {
+            'id': boss_id,
+            'type': 'milkdragon',
+            'x': boss_data.get('x', 960),
+            'y': boss_data.get('y', 400),
+            'vel_x': 0,
+            'vel_y': 0,
+            'facing_right': True,
+            'on_ground': False,
+            'health': int(base_health * health_multiplier),
+            'max_health': int(base_health * health_multiplier),
+            'base_damage': int(base_damage * damage_multiplier),
+            'state': 'running',  # running, jumping, skilling
+            'mode_timer': 0,
+            'mode_duration': 5.0,
+            'skill_timer': 0,
+            'skill_duration': 5.0,
+            'target_player_id': None,
+            'jump_target_x': 0,
+            'jump_target_y': 0,
+            'jump_phase': 'none',  # none, rising, falling
+            'projectiles': [],
+            'current_animation': 'running',
+            'frame_index': 0,
+            'last_update': time.time()
+        }
+        
+    def remove_boss(self, boss_id):
+        """从对象池移除Boss"""
+        if boss_id in self.bosses:
+            del self.bosses[boss_id]
+            # 将Boss ID添加到死亡集合中
+            self.dead_bosses.add(boss_id)
+            print(f"服务端移除Boss: {boss_id}，添加到死亡列表")
+            
     def set_map_data(self, map_data):
         """设置当前地图数据并生成敌人"""
         self.current_map_data = map_data
@@ -1013,10 +1128,11 @@ class GameObjectPool:
             
             # 平台数据解析完成
         
-        # 清除现有敌人
+        # 清除现有敌人和Boss
         self.enemies.clear()
+        self.bosses.clear()
         
-        # 从地图数据生成敌人
+        # 从地图数据生成敌人和Boss
         self.spawn_enemies_from_map()
         
     def spawn_enemies_from_map(self):
@@ -1053,15 +1169,39 @@ class GameObjectPool:
                         server_enemy_data['flight_height_min'] = self.parse_coordinate(enemy_data.get('flight_height_min', 'HEIGHT - 600'))
                         server_enemy_data['flight_height_max'] = self.parse_coordinate(enemy_data.get('flight_height_max', 'HEIGHT - 300'))
                     
-                    # 添加到对象池
-                    self.add_enemy(enemy_id, server_enemy_data)
-                    print(f"服务端生成敌人: {enemy_data['type']} ({enemy_data['variant']}) 位置({x}, {y}) ID: {enemy_id}")
+                    # 检查是否为Boss类型
+                    if enemy_data['type'] == 'boss':
+                        # 使用指定的ID或生成默认ID
+                        boss_id = enemy_data.get('id', enemy_id)
+                        
+                        # 检查Boss是否已经死亡
+                        if hasattr(self, 'dead_bosses') and boss_id in self.dead_bosses:
+                            print(f"Boss {boss_id} 已死亡，不再重新生成")
+                            continue
+                            
+                        # 创建Boss数据
+                        boss_data = {
+                            'x': x,
+                            'y': y,
+                            'health': enemy_data.get('health', 2000),
+                            'attack_power': enemy_data.get('attack_power', 30),
+                            'speed': enemy_data.get('speed', 3),
+                            'attack_cooldown': enemy_data.get('attack_cooldown', 2.0)
+                        }
+                        
+                        self.add_boss(boss_id, boss_data)
+                        print(f"服务端生成Boss: {enemy_data['variant']} 位置({x}, {y}) ID: {boss_id}")
+                    else:
+                        # 添加到敌人对象池
+                        self.add_enemy(enemy_id, server_enemy_data)
+                        print(f"服务端生成敌人: {enemy_data['type']} ({enemy_data['variant']}) 位置({x}, {y}) ID: {enemy_id}")
                     
                 except Exception as e:
                     print(f"服务端生成敌人失败: {e}, 数据: {enemy_data}")
                     
         self.map_enemies_spawned = True
         
+
     def parse_coordinate(self, coord):
         """解析坐标表达式"""
         if isinstance(coord, str):
@@ -1090,12 +1230,16 @@ class GameObjectPool:
         self.last_update_time = current_time
         
         # 更新所有敌怪
-        
-        # 更新所有敌怪
         for enemy_id, enemy in self.enemies.items():
             self._update_enemy_ai(enemy, dt)
             self._update_enemy_physics(enemy, dt)
             self._update_enemy_animation(enemy, dt)
+            
+        # 更新所有Boss
+        for boss_id, boss in self.bosses.items():
+            self._update_boss_ai(boss, dt)
+            self._update_boss_physics(boss, dt)
+            self._update_boss_animation(boss, dt)
             
     def _update_enemy_ai(self, enemy, dt):
         """更新敌怪AI逻辑"""
@@ -1520,6 +1664,197 @@ class GameObjectPool:
                 'health': player['health']
             })
         return players_data
+    
+    def get_all_bosses_data(self):
+        """获取所有Boss的同步数据"""
+        bosses_data = []
+        for boss_id, boss in self.bosses.items():
+            boss_sync_data = {
+                'boss_id': boss_id,
+                'type': boss['type'],
+                'x': boss['x'],
+                'y': boss['y'],
+                'vel_x': boss['vel_x'],
+                'vel_y': boss['vel_y'],
+                'facing_right': boss['facing_right'],
+                'state': boss['state'],
+                'current_animation': boss['current_animation'],
+                'frame_index': boss['frame_index'],
+                'health': boss['health'],
+                'max_health': boss['max_health'],
+                'attack_power': boss['base_damage'],
+                'mode': boss['state'],
+                'mode_timer': boss['mode_timer'],
+                'target_player_id': boss['target_player_id'],
+                'jump_target_x': boss['jump_target_x'],
+                'jump_target_y': boss['jump_target_y'],
+                'projectiles': boss['projectiles']
+            }
+            bosses_data.append(boss_sync_data)
+        return bosses_data
+    
+    def _update_boss_ai(self, boss, dt):
+        """更新Boss AI逻辑"""
+        import random
+        import math
+        
+        # 更新模式计时器
+        boss['mode_timer'] += dt
+        
+        # 寻找最近的玩家作为目标
+        target_player = None
+        min_distance = float('inf')
+        
+        for player_id, player in self.players.items():
+            distance = math.sqrt((boss['x'] - player['x'])**2 + (boss['y'] - player['y'])**2)
+            if distance < min_distance:
+                min_distance = distance
+                target_player = player
+        
+        if not target_player:
+            return
+            
+        # 模式切换逻辑
+        if boss['mode_timer'] >= boss['mode_duration']:
+            # 随机选择下一个模式
+            modes = ['running', 'jumping', 'skilling']
+            current_mode = boss['state']
+            available_modes = [m for m in modes if m != current_mode]
+            boss['state'] = random.choice(available_modes)
+            boss['mode_timer'] = 0
+            
+            if boss['state'] == 'jumping':
+                # 选择随机玩家位置作为跳跃目标
+                random_player = random.choice(list(self.players.values()))
+                boss['jump_target_x'] = random_player['x']
+                boss['jump_target_y'] = random_player['y'] - 100
+                boss['jump_phase'] = 'rising'
+                boss['current_animation'] = 'running'
+            elif boss['state'] == 'skilling':
+                boss['skill_timer'] = 0
+                boss['projectiles'] = []
+                boss['current_animation'] = 'skilling'
+            else:
+                boss['current_animation'] = 'running'
+        
+        # 根据当前状态执行对应逻辑
+        if boss['state'] == 'running':
+            self._update_boss_running(boss, dt, target_player)
+        elif boss['state'] == 'jumping':
+            self._update_boss_jumping(boss, dt)
+        elif boss['state'] == 'skilling':
+            self._update_boss_skilling(boss, dt)
+            
+    def _update_boss_running(self, boss, dt, target_player):
+        """Boss奔跑模式 - 冲撞最近玩家"""
+        import math
+        direction_x = target_player['x'] - boss['x']
+        direction_y = target_player['y'] - boss['y']
+        distance = math.sqrt(direction_x**2 + direction_y**2)
+        
+        if distance > 20:
+            speed = 200
+            boss['vel_x'] = (direction_x / distance) * speed
+            boss['vel_y'] = (direction_y / distance) * speed * 0.5
+            boss['facing_right'] = direction_x > 0
+        else:
+            boss['vel_x'] = 0
+            boss['vel_y'] = 0
+            
+    def _update_boss_jumping(self, boss, dt):
+        """Boss跳跃模式 - 跳到随机玩家位置"""
+        import math
+        if boss['jump_phase'] == 'rising':
+            # 向目标位置移动并上升
+            direction_x = boss['jump_target_x'] - boss['x']
+            direction_y = boss['jump_target_y'] - boss['y']
+            distance = math.sqrt(direction_x**2 + direction_y**2)
+            
+            if distance > 50:
+                speed = 300
+                boss['vel_x'] = (direction_x / distance) * speed
+                boss['vel_y'] = (direction_y / distance) * speed
+            else:
+                boss['jump_phase'] = 'falling'
+                boss['current_animation'] = 'falling'
+                boss['vel_y'] = 400  # 快速下落
+                
+        elif boss['jump_phase'] == 'falling':
+            # 快速下落
+            boss['vel_y'] = 400
+            if boss['on_ground']:
+                boss['jump_phase'] = 'none'
+                boss['vel_x'] = 0
+                boss['vel_y'] = 0
+                
+    def _update_boss_skilling(self, boss, dt):
+        """Boss技能模式 - 发射弹幕"""
+        import math
+        boss['skill_timer'] += dt
+        boss['vel_x'] = 0
+        boss['vel_y'] = 0
+        
+        # 每0.2秒发射一波弹幕
+        if boss['skill_timer'] % 0.2 < dt:
+            # 计算屏幕80%半径
+            screen_radius = min(1920, 1080) * 0.4
+            
+            # 发射8个方向的弹幕
+            for i in range(8):
+                angle = (i * 45) * math.pi / 180
+                projectile = {
+                    'x': boss['x'],
+                    'y': boss['y'],
+                    'vel_x': math.cos(angle) * 150,
+                    'vel_y': math.sin(angle) * 150,
+                    'damage': 25,
+                    'lifetime': 3.0,
+                    'radius': 16  # 弹幕放大两倍
+                }
+                boss['projectiles'].append(projectile)
+        
+        # 更新弹幕位置
+        for projectile in boss['projectiles'][:]:
+            projectile['x'] += projectile['vel_x'] * dt
+            projectile['y'] += projectile['vel_y'] * dt
+            projectile['lifetime'] -= dt
+            
+            if projectile['lifetime'] <= 0:
+                boss['projectiles'].remove(projectile)
+                
+    def _update_boss_physics(self, boss, dt):
+        """更新Boss物理"""
+        # 应用重力
+        if not boss['on_ground']:
+            boss['vel_y'] += self.GRAVITY * dt * 60
+        
+        # 更新位置
+        boss['x'] += boss['vel_x'] * dt
+        boss['y'] += boss['vel_y'] * dt
+        
+        # 屏幕边界限制 (假设屏幕宽度为1200，Boss宽度为400)
+        if boss['x'] < 200:  # 左边界
+            boss['x'] = 200
+            boss['vel_x'] = 0
+        elif boss['x'] > 1000:  # 右边界 (1200 - 200)
+            boss['x'] = 1000
+            boss['vel_x'] = 0
+        
+        # 简单的地面碰撞检测
+        boss['on_ground'] = False
+        for platform in self.platforms:
+            if (boss['x'] + 50 > platform['x'] and boss['x'] - 50 < platform['x'] + platform['width'] and
+                boss['y'] + 80 > platform['y'] and boss['y'] < platform['y'] + platform['height']):
+                if boss['vel_y'] > 0:  # 只有向下移动时才着陆
+                    boss['y'] = platform['y'] - 80
+                    boss['vel_y'] = 0
+                    boss['on_ground'] = True
+                    break
+                    
+    def _update_boss_animation(self, boss, dt):
+        """更新Boss动画"""
+        # 简单的帧更新，确保frame_index是整数
+        boss['frame_index'] = int((boss['frame_index'] + dt * 10) % 4)
 
 class NetworkServer:
     # 数据包大小优化常量
@@ -1732,9 +2067,10 @@ class NetworkServer:
                 # 更新游戏对象池
                 self.game_pool.update_game_objects()
                 
-                # 定期同步敌人数据
+                # 定期同步敌人数据和Boss数据
                 if current_time - self.last_sync_time >= self.sync_interval:
                     self._sync_enemies_data()
+                    self._sync_bosses_data()
                     self.last_sync_time = current_time
                 
                 # 控制循环频率
@@ -1754,6 +2090,20 @@ class NetworkServer:
             sync_message = {
                 'type': 'enemies_sync',
                 'enemies': enemies_data,
+                'timestamp': time.time()
+            }
+            self._broadcast_to_all(sync_message)
+    
+    def _sync_bosses_data(self):
+        """同步Boss数据给所有客户端"""
+        if not self.clients:
+            return
+            
+        bosses_data = self.game_pool.get_all_bosses_data()
+        if bosses_data:
+            sync_message = {
+                'type': 'bosses_sync',
+                'bosses': bosses_data,
                 'timestamp': time.time()
             }
             self._broadcast_to_all(sync_message)
@@ -2008,6 +2358,36 @@ class NetworkServer:
             enemy_id = self.add_enemy_to_pool(enemy_data)
             print(f"服务器: 玩家 {player_id} 创建了敌人 {enemy_data.get('enemy_type', '未知')}，ID: {enemy_id}")
         
+        elif message['type'] == 'boss_death':
+            # 处理Boss死亡消息
+            boss_id = message.get('boss_id', '')
+            print(f"服务器: Boss {boss_id} 已死亡")
+            
+            # 从服务端游戏对象池中移除Boss
+            if boss_id in self.game_pool.bosses:
+                del self.game_pool.bosses[boss_id]
+                print(f"服务器: Boss {boss_id} 已从游戏对象池中移除")
+            
+            # 广播Boss死亡消息给所有客户端
+            death_msg = {
+                'type': 'boss_death',
+                'boss_id': boss_id,
+                'player_id': player_id,
+                'timestamp': time.time()
+            }
+            self._broadcast_to_all(death_msg)
+            
+            # 检查是否所有Boss都已死亡，如果是则返回等待房间
+            if len(self.game_pool.bosses) == 0:
+                # 广播返回等待房间消息
+                return_msg = {
+                    'type': 'return_to_waiting_room',
+                    'reason': 'all_bosses_defeated',
+                    'timestamp': time.time()
+                }
+                self._broadcast_to_all(return_msg)
+                print("服务器: 所有Boss已被击败，返回等待房间")
+        
         elif message['type'] == 'enemy_damage':
             # 处理敌人受伤信息
             enemy_id = message.get('enemy_id', '')
@@ -2198,57 +2578,9 @@ class NetworkServer:
                 # 向每个其他客户端发送消息
                 successful_sends = 0
                 for client_id, client_data in other_clients:
-                    try:
-                        client_socket = client_data['socket']
-                        if client_socket.fileno() != -1:  # 检查socket是否有效
-                            message_str = json.dumps(disbanded_msg) + '\n'  # 添加换行符
-                            client_socket.send(message_str.encode('utf-8'))
-                            successful_sends += 1
-                            print(f"成功向客户端 {client_id} 发送解散消息")
-                        else:
-                            print(f"客户端 {client_id} 的socket已失效")
-                    except Exception as e:
-                        print(f"向客户端 {client_id} 发送解散消息失败: {e}")
-                
-                print(f"房间解散消息发送完成，成功发送给 {successful_sends} 个客户端")
-                
-                # 重置房主ID
-                self.host_player_id = None
-                
-                # 延迟停止服务器，给客户端时间处理消息
-                import threading
-                def delayed_stop():
-                    import time
-                    time.sleep(3)  # 增加到3秒确保消息处理完成
-                    print("延迟停止服务器")
-                    self.stop()
-                
-                stop_thread = threading.Thread(target=delayed_stop, daemon=True)
-                stop_thread.start()
-            
-            # 关闭socket
-            try:
-                client_info['socket'].close()
-            except:
-                pass
-            
-            # 从客户端列表中移除（如果还存在的话）
-            if player_id in self.clients:
-                del self.clients[player_id]
-            
-            # 从已连接地址集合中移除
-            self.connected_addresses.discard(address)
-            
-            # 如果不是房主断开连接，通知其他玩家
-            if not (is_host and player_id == self.host_player_id):
-                # 普通玩家断开连接
-                disconnect_msg = {
-                    'type': 'player_disconnect',
-                    'player_id': player_id
-                }
-                self._broadcast_to_all(disconnect_msg)
-            
-            print(f"玩家 {player_id} 已断开连接")
+                    pass  # 这里应该有具体的发送逻辑
+                    
+
 
 def start_server():
     """启动服务器的便捷函数"""
